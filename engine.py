@@ -83,7 +83,8 @@ class Hand:
 
     def remove(self, card):
         self.cards.remove(card)
-
+    def get_card(self, index):
+        return self.cards[index]
     def __str__(self):
         return f"{self.cards}"
 
@@ -92,6 +93,20 @@ class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks'
     '''
     Encodes the game tree for one round of poker.
     '''
+    def index_card(self, player: int, card_index: int):
+        '''
+        Returns the card at the specified index in a player's hand
+
+        Args:
+            player: Which player's hand we will look at. (Must be 0 (player A) or 1 (Player B))
+            card_index: Which card in their hand we will look at. (Must be 0 (Card 1), 1 (Card 2), or 2 (Card 3))
+        
+        Returns:
+            str: The card which is at the specified index in the player's hand
+        '''
+        hand = self.hands[player]
+        card = hand.get_card(card_index)
+        return card
     def get_delta(self, winner_index: int) -> int:
         '''Returns the delta for player A and -delta for player B.
 
@@ -225,13 +240,15 @@ class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks'
         active = self.button % 2
         if isinstance(action, DiscardAction):
             if active == 0:
-                self.hands[0].remove(action.card)
-                self.board.push(action.card)
+                action_card = self.index_card(0, action.card)
+                self.hands[0].remove(action_card)###How to index in eval7
+                self.board.push(action_card)
                 state = RoundState(1, self.street, self.pips, self.stacks, self.hands, self.deck, self.board, self)
                 return state.proceed_street()
             else:
-                self.hands[1].remove(action.card)
-                self.board.push(action.card)
+                action_card = self.index_card(1, action.card)
+                self.hands[1].remove(action_card)
+                self.board.push(action_card)
                 state = RoundState(0, self.street, self.pips, self.stacks, self.hands, self.deck, self.board, self)
                 return state.proceed_street()
         if isinstance(action, FoldAction):
@@ -439,9 +456,10 @@ class Player():
                         if min_raise <= amount <= max_raise:
                             return action(amount)
                     elif clause[0] == 'D':
-                        card = str(clause[1:])
-                        ###### Finish after game higher order development ######
-                        ###### Add a way to test if the card is in their hand ######
+                        card = int(clause[1:])
+                        if 0 <= card <= 2:
+                            return action(card)
+                        ###### index the player's hand 'D0', 'D1', or 'D3' ######
                     else:
                         return action()
                 game_log.append(self.name + ' attempted illegal ' + action.__name__)

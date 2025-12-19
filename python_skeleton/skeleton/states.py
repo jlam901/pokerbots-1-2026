@@ -17,37 +17,26 @@ class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks'
     '''
     Encodes the game tree for one round of poker.
     '''
-    def showdown(self) -> TerminalState:
+    def index_card(self, player: int, card_index: int):
         '''
-        Compares the players' hands and computes the final payoffs at showdown.
+        Returns the card at the specified index in a player's hand
 
-        Evaluates both players' hands (hole cards + community cards) and determines
-        the winner. The payoff (delta) is calculated based on:
-        - The winner of the hand
-        - The current pot size
-
+        Args:
+            player: Which player's hand we will look at. (Must be 0 (player A) or 1 (Player B))
+            card_index: Which card in their hand we will look at. (Must be 0 (Card 1), 1 (Card 2), or 2 (Card 3))
+        
         Returns:
-            TerminalState: A terminal state object containing:
-                - List of deltas (positive for winner, negative for loser)
-                - Reference to the previous game state
-        
-        Note:
-            This method assumes both players have equal stacks when reaching showdown,
-            which is enforced by an assertion.
+            str: The card which is at the specified index in the player's hand
         '''
-        ###Fix after fixing game logic
-        score0 = eval7.evaluate(self.board.getCards() + self.hands[0])
-        score1 = eval7.evaluate(self.board.getCards + self.hands[1])
-        assert(self.stacks[0] == self.stacks[1])
-        if score0 > score1:
-            delta = self.get_delta(0)
-        elif score0 < score1:
-            delta = self.get_delta(1)
-        else:
-            # split the pot
-            delta = self.get_delta(2)
-        
-        return TerminalState([int(delta), -int(delta)], self)
+        hand = self.hands[player]
+        card = hand.get_card(card_index)
+        return card
+
+    def showdown(self):
+        '''
+        Compares the players' hands and computes payoffs.
+        '''
+        return TerminalState([0, 0], None, self)
 
     def legal_actions(self):
         '''
@@ -122,13 +111,15 @@ class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks'
         active = self.button % 2
         if isinstance(action, DiscardAction):
             if active == 0:
-                self.hands[0].remove(action.card)
-                self.board.push(action.card)
+                action_card = self.index_card(0, action.card)
+                self.hands[0].remove(action_card)###How to index in eval7
+                self.board.push(action_card)
                 state = RoundState(1, self.street, self.pips, self.stacks, self.hands, self.deck, self.board, self)
                 return state.proceed_street()
             else:
-                self.hands[1].remove(action.card)
-                self.board.push(action.card)
+                action_card = self.index_card(1, action.card)
+                self.hands[1].remove(action_card)
+                self.board.push(action_card)
                 state = RoundState(0, self.street, self.pips, self.stacks, self.hands, self.deck, self.board, self)
                 return state.proceed_street()
         if isinstance(action, FoldAction):

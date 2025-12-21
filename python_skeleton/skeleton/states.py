@@ -5,7 +5,7 @@ from collections import namedtuple
 from .actions import FoldAction, CallAction, CheckAction, RaiseAction, DiscardAction
 
 GameState = namedtuple('GameState', ['bankroll', 'game_clock', 'round_num'])
-TerminalState = namedtuple('TerminalState', ['deltas', 'bounty_hits', 'previous_state'])
+TerminalState = namedtuple('TerminalState', ['deltas', 'previous_state'])
 
 NUM_ROUNDS = 1000
 STARTING_STACK = 400
@@ -13,25 +13,10 @@ BIG_BLIND = 2
 SMALL_BLIND = 1
 
 
-class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks', 'hands', 'deck', 'previous_state', 'board'])):
+class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks', 'hands', 'deck', 'board', 'previous_state'])):
     '''
     Encodes the game tree for one round of poker.
     '''
-    def index_card(self, player: int, card_index: int):
-        '''
-        Returns the card at the specified index in a player's hand
-
-        Args:
-            player: Which player's hand we will look at. (Must be 0 (player A) or 1 (Player B))
-            card_index: Which card in their hand we will look at. (Must be 0 (Card 1), 1 (Card 2), or 2 (Card 3))
-        
-        Returns:
-            str: The card which is at the specified index in the player's hand
-        '''
-        hand = self.hands[player]
-        card = hand.get_card(card_index)
-        return card
-
     def showdown(self):
         '''
         Compares the players' hands and computes payoffs.
@@ -71,17 +56,18 @@ class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks'
 
         possible streets: 0, 2, 3, 4, 5, 6
         '''
-        ### Put the board as peek deck of the street number
-        ### this changes the board state and returns it in the next round state
+        ### Put the board as peek deck of the street number and make sure board includes this peek + the players discarded cards after state
         if self.street == 6:
             return self.showdown()
         elif self.street == 0:
             new_street = 2
-            self.board = self.deck.peek(new_street)
+            button = 0 ### Player A discards first, since they are in position
+            # self.board = self.deck.peek(new_street) fix this logic
         else:
             new_street = self.street + 1
-            self.board = self.deck.peek(new_street)
-        return RoundState(1, new_street, [0, 0], self.stacks, self.hands, self.deck, self.board, self)
+            button = 1
+            # self.board = self.deck.peek(new_street) fix this logic
+        return RoundState(button, new_street, [0, 0], self.stacks, self.hands, self.deck, self.board, self)
 
     def proceed(self, action):
         '''
@@ -112,7 +98,7 @@ class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks'
         if isinstance(action, DiscardAction):
             if active == 0:
                 action_card = self.index_card(0, action.card)
-                self.hands[0].remove(action_card)###How to index in eval7
+                self.hands[0].remove(action_card)###How to index in pkrbot
                 self.board.push(action_card)
                 state = RoundState(1, self.street, self.pips, self.stacks, self.hands, self.deck, self.board, self)
                 return state.proceed_street()
@@ -123,7 +109,7 @@ class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks'
                 state = RoundState(0, self.street, self.pips, self.stacks, self.hands, self.deck, self.board, self)
                 return state.proceed_street()
         if isinstance(action, FoldAction):
-            delta = self.get_delta((1 - active) % 2) # if active folds, the other player (1 - active) wins
+            delta = self.stacks[0] - STARTING_STACK if active == 0 else STARTING_STACK - self.stacks[1]
             return TerminalState([delta, -delta], self)
         if isinstance(action, CallAction):
             if self.button == 0:  # sb calls bb

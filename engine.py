@@ -10,7 +10,7 @@ import math
 import json
 import subprocess
 import socket
-import eval7
+import pkrbot ###import eval7, but better
 import sys
 import os
 import random
@@ -23,12 +23,13 @@ DiscardAction = namedtuple('DiscardAction', ['card'])
 FoldAction = namedtuple('FoldAction', [])
 CallAction = namedtuple('CallAction', [])
 CheckAction = namedtuple('CheckAction', [])
-# we coalesce BetAction and RaiseAction for convenience
+# # we coalesce BetAction and RaiseAction for convenience
 RaiseAction = namedtuple('RaiseAction', ['amount'])
+
 TerminalState = namedtuple('TerminalState', ['deltas', 'previous_state'])
 
 STREET_NAMES = ['Flop', 'Turn', 'River']
-DECODE = {'F': FoldAction, 'C': CallAction, 'K': CheckAction, 'R': RaiseAction}
+DECODE = {'F': FoldAction, 'C': CallAction, 'K': CheckAction, 'R': RaiseAction, 'D': DiscardAction}
 CCARDS = lambda cards: str(cards)
 PCARDS = lambda cards: '[{}]'.format(str(cards))### Changed from PCARDS = lambda cards: '[{}]'.format(' '.join(map(str, cards)))
 PVALUE = lambda name, value: ', {} ({})'.format(name, value)
@@ -38,7 +39,7 @@ STATUS = lambda players: ''.join([PVALUE(p.name, p.bankroll) for p in players])
 #
 # T#.### the player's game clock
 # P# the- player's index
-# H**,** the player's hand in common format
+# H**,**,** the player's hand in common format
 # F a fold action in the round history
 # C a call action in the round history
 # K a check action in the round history
@@ -54,42 +55,9 @@ STATUS = lambda players: ''.join([PVALUE(p.name, p.bankroll) for p in players])
 # The engine expects a response of K at the end of the round as an ack,
 # otherwise a response which encodes the player's action
 # Action history is sent once, including the player's actions
-class Board:
-    def __init__(self, cards):
-        self.cards = cards
-
-    def evaluate(self):
-        return eval7.evaluate(self.cards)
-
-    def handtype(self):
-        return eval7.handtype(self.evaluate())
-
-    def push(self, card):
-        self.cards.append(card)
-
-    def getCards(self):
-        return self.cards
-
-    def getStreet(self):
-        return len(self.cards)
-    
-    def __str__(self):
-        return f"{self.cards}"
 
 
-class Hand:
-    def __init__(self, cards):
-        self.cards = cards
-
-    def remove(self, card):
-        self.cards.remove(card)
-    def get_card(self, index):
-        return self.cards[index]
-    def __str__(self):
-        return f"{self.cards}"
-
-
-class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks', 'hands', 'deck', 'previous_state', 'board'])):
+class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks', 'hands', 'deck', 'board', 'previous_state'])):
     '''
     Encodes the game tree for one round of poker.
     '''
@@ -154,8 +122,8 @@ class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks'
             which is enforced by an assertion.
         '''
         ###Fix after fixing game logic
-        score0 = eval7.evaluate(self.board.getCards() + self.hands[0])
-        score1 = eval7.evaluate(self.board.getCards + self.hands[1])
+        score0 = pkrbot.evaluate(self.board.get_cards() + list(self.hands[0]))
+        score1 = pkrbot.evaluate(self.board.get_cards() + list(self.hands[1]))
         assert(self.stacks[0] == self.stacks[1])
         if score0 > score1:
             delta = self.get_delta(0)
@@ -200,17 +168,18 @@ class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks'
 
         possible streets: 0, 2, 3, 4, 5, 6
         '''
-        ### Put the board as peek deck of the street number
-        ### this changes the board state and returns it in the next round state
+        ### Put the board as peek deck of the street number and make sure board includes this peek + the players discarded cards after state
         if self.street == 6:
             return self.showdown()
         elif self.street == 0:
             new_street = 2
+            button = 0 ### Player A discards first, since they are in position
             self.board = self.deck.peek(new_street)
         else:
             new_street = self.street + 1
+            button = 1
             self.board = self.deck.peek(new_street)
-        return RoundState(1, new_street, [0, 0], self.stacks, self.hands, self.deck, self.board, self)
+        return RoundState(button, new_street, [0, 0], self.stacks, self.hands, self.deck, self.board, self)
 
     def proceed(self, action):
         '''
@@ -241,7 +210,7 @@ class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks'
         if isinstance(action, DiscardAction):
             if active == 0:
                 action_card = self.index_card(0, action.card)
-                self.hands[0].remove(action_card)###How to index in eval7
+                self.hands[0].remove(action_card)###How to index in pkrbot
                 self.board.push(action_card)
                 state = RoundState(1, self.street, self.pips, self.stacks, self.hands, self.deck, self.board, self)
                 return state.proceed_street()
@@ -459,10 +428,16 @@ class Player():
                         card = int(clause[1:])
                         if 0 <= card <= 2:
                             return action(card)
-                        ###### index the player's hand 'D0', 'D1', or 'D3' ######
+                        else:
+                            game_log.append(f"{self.name} attempted to discard invalid index {card}")
+                            # Invalid index - fall through to default action handling
+                        ###### index the player's hand 'D0', 'D1', or 'D2' ######
                     else:
                         return action()
-                game_log.append(self.name + ' attempted illegal ' + action.__name__)
+                else:
+                    # Action is not in legal_actions
+                    game_log.append(f"street = {round_state.street}")
+                    game_log.append(self.name + ' attempted illegal ' + action.__name__)
             except socket.timeout:
                 error_message = self.name + ' ran out of time'
                 game_log.append(error_message)
@@ -517,7 +492,7 @@ class Game():
             self.player_messages[1] = ['T0.', 'P1', 'H' + CCARDS(round_state.hands[1]), 'G']
         elif round_state.street > 0 and round_state.button == 1:
             board = round_state.board
-            self.log.append(STREET_NAMES[round_state.street] + ' ' + PCARDS(board.getCards()) +
+            self.log.append(STREET_NAMES[round_state.street] + ' ' + PCARDS(board.get_cards()) +
                             PVALUE(players[0].name, STARTING_STACK-round_state.stacks[0]) +
                             PVALUE(players[1].name, STARTING_STACK-round_state.stacks[1]))
             self.log.append(f"Current stacks: {round_state.stacks[0]}, {round_state.stacks[1]}")
@@ -560,24 +535,16 @@ class Game():
             self.player_messages[1].append('O' + CCARDS(previous_state.hands[0]))
         self.log.append('{} awarded {}'.format(players[0].name, round_state.deltas[0]))
         self.log.append('{} awarded {}'.format(players[1].name, round_state.deltas[1]))
-        self.player_messages[0].append('D' + str(round_state.deltas[0]))
-        self.player_messages[1].append('D' + str(round_state.deltas[1]))
-
-        hit_chars = ['0', '0']
-        if round_state.deltas[0] > 0: # mask out the losing player's hit
-            hit_chars[1] = '#'
-        elif round_state.deltas[1] > 0:
-            hit_chars[0] = '#'
-        self.player_messages[0].append('Y' + hit_chars[0] + hit_chars[1])
-        self.player_messages[1].append('Y' + hit_chars[1] + hit_chars[0])
+        self.player_messages[0].append('A' + str(round_state.deltas[0]))
+        self.player_messages[1].append('A' + str(round_state.deltas[1]))
 
     def run_round(self, players):
         '''
         Runs one round of poker.
         '''
-        deck = eval7.Deck()
+        deck = pkrbot.Deck()
         deck.shuffle()
-        hands = [Hand(deck.deal(3)), Hand(deck.deal(3))]
+        hands = [pkrbot.Hand(deck.deal(3)), pkrbot.Hand(deck.deal(3))]
         board = []
         pips = [SMALL_BLIND, BIG_BLIND]
         stacks = [STARTING_STACK - SMALL_BLIND, STARTING_STACK - BIG_BLIND]

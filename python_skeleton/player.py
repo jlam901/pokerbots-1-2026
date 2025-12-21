@@ -88,10 +88,6 @@ class Player(Bot):
         continue_cost = opp_pip - my_pip  # the number of chips needed to stay in the pot
         my_contribution = STARTING_STACK - my_stack  # the number of chips you have contributed to the pot
         opp_contribution = STARTING_STACK - opp_stack  # the number of chips your opponent has contributed to the pot
-
-        print("my_cards: ", my_cards)
-        print("board_cards: ", board_cards)
-
         
         # Only use DiscardAction if it's in legal_actions (which already checks street)
         # legal_actions() returns DiscardAction only when street is 2 or 3

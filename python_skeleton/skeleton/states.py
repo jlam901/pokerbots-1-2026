@@ -62,14 +62,12 @@ class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks'
         elif self.street == 0:
             new_street = 2
             button = 0 ### Player A discards first, since they are in position
-            # self.board.extend(self.deck.peek(new_street))
         elif self.street == 2 or self.street == 3:
             new_street = self.street + 1
             button = 1
         else:
             new_street = self.street + 1
             button = 1
-            # self.board.append(self.deck.peek(new_street - 1)[new_street - 2])
 
         return RoundState(button, new_street, [0, 0], self.stacks, self.hands, self.board, self)
 

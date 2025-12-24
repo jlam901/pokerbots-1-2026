@@ -1,7 +1,7 @@
 '''
 Simple example pokerbot, written in Python.
 '''
-from skeleton.actions import FoldAction, CallAction, CheckAction, RaiseAction
+from skeleton.actions import FoldAction, CallAction, CheckAction, RaiseAction, DiscardAction
 from skeleton.states import GameState, TerminalState, RoundState
 from skeleton.states import NUM_ROUNDS, STARTING_STACK, BIG_BLIND, SMALL_BLIND
 from skeleton.bot import Bot
@@ -44,7 +44,6 @@ class Player(Bot):
         #round_num = game_state.round_num  # the round number from 1 to NUM_ROUNDS
         #my_cards = round_state.hands[active]  # your cards
         #big_blind = bool(active)  # True if you are the big blind
-        #my_bounty = round_state.bounties[active]  # your current bounty rank
         pass
 
     def handle_round_over(self, game_state, terminal_state, active):
@@ -61,21 +60,9 @@ class Player(Bot):
         '''
         #my_delta = terminal_state.deltas[active]  # your bankroll change from this round
         previous_state = terminal_state.previous_state  # RoundState before payoffs
-        #street = previous_state.street  # 0, 3, 4, or 5 representing when this round ended
+        #street = previous_state.street  # 0,2,3,4,5,6 representing when this round ended
         #my_cards = previous_state.hands[active]  # your cards
         #opp_cards = previous_state.hands[1-active]  # opponent's cards or [] if not revealed
-        
-        my_bounty_hit = terminal_state.bounty_hits[active]  # True if you hit bounty
-        opponent_bounty_hit = terminal_state.bounty_hits[1-active] # True if opponent hit bounty
-        bounty_rank = previous_state.bounties[active]  # your bounty rank
-
-        # The following is a demonstration of accessing illegal information (will not work)
-        opponent_bounty_rank = previous_state.bounties[1-active]  # attempting to grab opponent's bounty rank
-
-        if my_bounty_hit:
-            print("I hit my bounty of " + bounty_rank + "!")
-        if opponent_bounty_hit:
-            print("Opponent hit their bounty of " + opponent_bounty_rank + "!")
 
     def get_action(self, game_state, round_state, active):
         '''
@@ -93,24 +80,25 @@ class Player(Bot):
         legal_actions = round_state.legal_actions()  # the actions you are allowed to take
         street = round_state.street  # 0, 3, 4, or 5 representing pre-flop, flop, turn, or river respectively
         my_cards = round_state.hands[active]  # your cards
-        board_cards = round_state.deck[:street]  # the board cards
+        board_cards = round_state.board  # the board cards
         my_pip = round_state.pips[active]  # the number of chips you have contributed to the pot this round of betting
         opp_pip = round_state.pips[1-active]  # the number of chips your opponent has contributed to the pot this round of betting
         my_stack = round_state.stacks[active]  # the number of chips you have remaining
         opp_stack = round_state.stacks[1-active]  # the number of chips your opponent has remaining
         continue_cost = opp_pip - my_pip  # the number of chips needed to stay in the pot
-        my_bounty = round_state.bounties[active]  # your current bounty rank
         my_contribution = STARTING_STACK - my_stack  # the number of chips you have contributed to the pot
         opp_contribution = STARTING_STACK - opp_stack  # the number of chips your opponent has contributed to the pot
-
         
+        # Only use DiscardAction if it's in legal_actions (which already checks street)
+        # legal_actions() returns DiscardAction only when street is 2 or 3
+        if DiscardAction in legal_actions:
+            return DiscardAction(0)  # Always discards the first card in the bot's hand
         if RaiseAction in legal_actions:
            min_raise, max_raise = round_state.raise_bounds()  # the smallest and largest numbers of chips for a legal bet/raise
            min_cost = min_raise - my_pip  # the cost of a minimum bet/raise
            max_cost = max_raise - my_pip  # the cost of a maximum bet/raise
-        if RaiseAction in legal_actions:
-            if random.random() < 0.5:
-                return RaiseAction(min_raise)
+           if random.random() < 0.5:
+            return RaiseAction(min_raise)
         if CheckAction in legal_actions:  # check-call
             return CheckAction()
         if random.random() < 0.25:

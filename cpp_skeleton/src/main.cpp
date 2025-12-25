@@ -73,20 +73,31 @@ struct Bot {
       maxCost = raiseBounds[1] - myPip;  // the cost of a maximum bet/raise
     }
 
+    // Handle DISCARD first (highest priority)
     if (legalActions.find(Action::Type::DISCARD) != legalActions.end()) {
       // Discards the first card in the bot's hand
       return { Action::Type::DISCARD, 0 };
     }
 
+    // For betting actions, try RAISE first (with some probability)
     if (legalActions.find(Action::Type::RAISE) != legalActions.end()) {
       if (rand() % 2 == 0) {
         return { Action::Type::RAISE, raiseBounds[0] };
       }
     }
+
+    // If we can CHECK, do it
     if (legalActions.find(Action::Type::CHECK) != legalActions.end()) {
       return { Action::Type::CHECK };
     }
-    if (rand() % 4 == 0) {
+
+    // If we can CALL, do it (only reached if CHECK is not legal)
+    if (legalActions.find(Action::Type::CALL) != legalActions.end()) {
+      return { Action::Type::CALL };
+    }
+
+    // Last resort: FOLD (only reached if CHECK and CALL are not legal)
+    if (legalActions.find(Action::Type::FOLD) != legalActions.end()) {
       return { Action::Type::FOLD };
     }
     return { Action::Type::CALL };

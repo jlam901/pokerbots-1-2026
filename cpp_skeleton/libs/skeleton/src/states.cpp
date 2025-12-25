@@ -15,6 +15,12 @@ namespace pokerbots::skeleton {
   std::unordered_set<Action::Type> RoundState::legalActions() const {
     auto active = getActive(button);
     auto continueCost = pips[1 - active] - pips[active];
+    if (street == 2 || street == 3) {
+      // Only the player matching street % 2 can discard, the other can only check
+      return active == (street % 2)
+        ? std::unordered_set<Action::Type>{ Action::Type::DISCARD }
+        : std::unordered_set<Action::Type>{ Action::Type::CHECK };
+    }
     if (continueCost == 0) {
       // we can only raise the stakes if both players can afford it
       auto betsForbidden = stacks[0] == 0 || stacks[1] == 0;
@@ -44,9 +50,16 @@ namespace pokerbots::skeleton {
     if (street == 6) {
       return this->showdown();
     }
-    auto newStreet = street == 0 ? 2 : street + 1;
-    auto newButton = street == 0 ? 0 : 1;
-    return std::make_shared<RoundState>(1, newStreet, std::array<int, 2>{0, 0}, stacks, hands, board, getShared());
+    int newStreet;
+    int newButton;
+    if (street == 0) {
+      newStreet = 2;
+      newButton = 0;  // Player A discards first, since they are in position
+    } else {
+      newStreet = street + 1;
+      newButton = 1;
+    }
+    return std::make_shared<RoundState>(newButton, newStreet, std::array<int, 2>{0, 0}, stacks, hands, board, getShared());
   }
 
   StatePtr RoundState::proceed(Action action) const {
@@ -54,11 +67,13 @@ namespace pokerbots::skeleton {
     switch (action.actionType) {
     case Action::Type::DISCARD: {
       auto newBoard = board;
-      if (hands[active].size() != 0) {
-        auto newCard = hands[active][action.card];
+      std::array<std::vector<std::string>, 2> newHands = hands;
+      if (newHands[active].size() != 0) {
+        auto newCard = newHands[active][action.card];
         newBoard.push_back(newCard);
+        newHands[active].erase(newHands[active].begin() + action.card);
       }
-      return std::make_shared<RoundState>((1 - active) % 2, street, pips, stacks, hands, std::move(newBoard), getShared());
+      return std::make_shared<RoundState>((1 - active) % 2, street, pips, stacks, std::move(newHands), std::move(newBoard), getShared());
     }
     case Action::Type::FOLD: {
       auto delta = active == 0 ? stacks[0] - STARTING_STACK : STARTING_STACK - stacks[1];
@@ -83,7 +98,7 @@ namespace pokerbots::skeleton {
       return state->proceedStreet();
     }
     case Action::Type::CHECK: {
-      if ((street == 0 && button > 0) || button > 1) {
+      if ((street == 0 && button > 0) || button > 1 || street == 2 || street == 3) {
         return this->proceedStreet();
       }
       // let opponent act

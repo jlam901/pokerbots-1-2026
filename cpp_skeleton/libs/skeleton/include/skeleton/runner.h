@@ -24,6 +24,7 @@ namespace pokerbots::skeleton {
 
     template <typename Action> void send(Action const& action) {
       stream << action << '\n';
+      stream.flush();
     }
 
     std::vector<std::string> receive() {
@@ -71,9 +72,7 @@ namespace pokerbots::skeleton {
             boost::split(cards, leftover, boost::is_any_of(","));
 
             std::array<std::vector<std::string>, 2> hands;
-            hands[active][0] = cards[0];
-            hands[active][1] = cards[1];
-            hands[active][2] = cards[2];
+            hands[active] = { cards[0], cards[1], cards[2] };
             std::vector<std::string> board;
             std::array<int, 2> pips = { SMALL_BLIND, BIG_BLIND };
             std::array<int, 2> stacks = {
@@ -120,10 +119,7 @@ namespace pokerbots::skeleton {
           case 'B': {
             std::vector<std::string> cards;
             boost::split(cards, leftover, boost::is_any_of(","));
-            std::vector<std::string> revisedBoard;
-            for (auto j = 0; j < cards.size(); ++j) {
-              revisedBoard[j] = cards[j];
-            }
+            std::vector<std::string> revisedBoard(cards.begin(), cards.end());
             auto maker = std::static_pointer_cast<const RoundState>(roundState);
             roundState = std::make_shared<RoundState>(maker->button, maker->street, maker->pips, maker->stacks,
               maker->hands, revisedBoard, maker->previousState);
@@ -136,7 +132,9 @@ namespace pokerbots::skeleton {
             roundState = std::static_pointer_cast<const TerminalState>(roundState)->previousState;
             auto maker = std::static_pointer_cast<const RoundState>(roundState);
             auto revisedHands = maker->hands;
-            revisedHands[1 - active] = { cards[0], cards[1] };
+            for (auto& card : cards) {
+              revisedHands[1 - active].push_back(card);
+            }
             // rebuild history
             roundState = std::make_shared<RoundState>(maker->button, maker->street, maker->pips, maker->stacks,
               revisedHands, maker->board, maker->previousState);
@@ -163,9 +161,11 @@ namespace pokerbots::skeleton {
           }
           }
         }
-        if (roundFlag) {
+        // If roundFlag is true (first message) or roundState is a TerminalState (round is over), send CHECK to ack
+        if (roundFlag || std::dynamic_pointer_cast<const TerminalState>(roundState)) {
           send(Action{ Action::Type::CHECK });
         } else {
+          // It's a RoundState, get action from bot
           auto action = pokerbot.getAction(gameInfo, std::static_pointer_cast<const RoundState>(roundState), active);
           send(action);
         }

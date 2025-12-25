@@ -11,7 +11,7 @@ namespace pokerbots::skeleton {
     case Action::Type::CHECK:
       return os << 'K';
     case Action::Type::DISCARD:
-      return os << 'D';
+      return os << 'D' << a.card;
     default:
       return os << 'R' << a.amount;
     }

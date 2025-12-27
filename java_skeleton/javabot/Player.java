@@ -92,7 +92,7 @@ public class Player implements Bot {
 
         // Handle DISCARD first (highest priority)
         if (legalActions.contains(ActionType.DISCARD_ACTION_TYPE)) {
-            // Discards the first card in the bot's hand
+            // Always discards the first card in the bot's hand
             return new Action(ActionType.DISCARD_ACTION_TYPE, 0, 0);
         }
 
@@ -108,14 +108,11 @@ public class Player implements Bot {
             return new Action(ActionType.CHECK_ACTION_TYPE);
         }
 
-        // If we can CALL, do it (only reached if CHECK is not legal)
-        if (legalActions.contains(ActionType.CALL_ACTION_TYPE)) {
-            return new Action(ActionType.CALL_ACTION_TYPE);
-        }
-
-        // Last resort: FOLD (only reached if CHECK and CALL are not legal)
-        if (legalActions.contains(ActionType.FOLD_ACTION_TYPE)) {
-            return new Action(ActionType.FOLD_ACTION_TYPE);
+        // If we can't check, fold with 25% probability, otherwise call
+        if (Math.random() < 0.25) {
+            if (legalActions.contains(ActionType.FOLD_ACTION_TYPE)) {
+                return new Action(ActionType.FOLD_ACTION_TYPE);
+            }
         }
         return new Action(ActionType.CALL_ACTION_TYPE);
     }

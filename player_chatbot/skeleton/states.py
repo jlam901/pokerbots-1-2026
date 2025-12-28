@@ -30,7 +30,7 @@ class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks'
         active = self.button % 2
         continue_cost = self.pips[1-active] - self.pips[active]
         if self.street in (2, 3):
-            return {DiscardAction} if active == self.street % 2 else {CheckAction}
+            return {DiscardAction} if active != self.street % 2 else {CheckAction}
         if continue_cost == 0:
             # we can only raise the stakes if both players can afford it
             bets_forbidden = (self.stacks[0] == 0 or self.stacks[1] == 0)
@@ -61,13 +61,13 @@ class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks'
             return self.showdown()
         elif self.street == 0:
             new_street = 2
-            button = 0 ### Player A discards first, since they are in position
-        elif self.street == 2 or self.street == 3:
-            new_street = self.street + 1
-            button = 1
+            button = 1 ### Player B discards first, since they are out of position
+        elif self.street == 2:
+            new_street = 3
+            button = 0 ### Player A discards second
         else:
             new_street = self.street + 1
-            button = 1
+            button = 1 ### Player B acts first after the discard phase
 
         return RoundState(button, new_street, [0, 0], self.stacks, self.hands, self.board, self)
 

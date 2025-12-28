@@ -108,7 +108,6 @@ class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks'
             This method assumes both players have equal stacks when reaching showdown,
             which is enforced by an assertion.
         '''
-        ###Fix after fixing game logic
         score0 = pkrbot.evaluate(self.board + self.hands[0])
         score1 = pkrbot.evaluate(self.board + self.hands[1])
         assert(self.stacks[0] == self.stacks[1])
@@ -129,7 +128,7 @@ class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks'
         active = self.button % 2
         continue_cost = self.pips[1-active] - self.pips[active]
         if self.street in (2, 3):
-            return {DiscardAction} if active == self.street % 2 else {CheckAction}
+            return {DiscardAction} if active != self.street % 2 else {CheckAction}
         if continue_cost == 0:
             # we can only raise the stakes if both players can afford it
             bets_forbidden = (self.stacks[0] == 0 or self.stacks[1] == 0)
@@ -160,11 +159,14 @@ class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks'
             return self.showdown()
         elif self.street == 0:
             new_street = 2
-            button = 0 ### Player A discards first, since they are in position
+            button = 1 ### Player B discards first, since they are out of position
             self.board.extend(self.deck.peek(new_street))
-        elif self.street == 2 or self.street == 3:
-            new_street = self.street + 1
-            button = 1
+        elif self.street == 2:
+            new_street = 3
+            button = 0 ### Player A discards second
+        elif self.street == 3:
+            new_street = 4
+            button = 1 ### Player B acts first after the discard phase
         else:
             new_street = self.street + 1
             button = 1
@@ -473,7 +475,7 @@ class Game():
             self.log.append('{} dealt {}'.format(players[1].name, PCARDS(round_state.hands[1])))
             self.player_messages[0] = ['T0.', 'P0', 'H' + CCARDS(round_state.hands[0]), 'G']
             self.player_messages[1] = ['T0.', 'P1', 'H' + CCARDS(round_state.hands[1]), 'G']
-        elif (round_state.street > 0 and round_state.street != 2 and round_state.button == 1) or (round_state.street == 2 and round_state.button == 0):
+        elif (round_state.street > 0 and round_state.street != 3 and round_state.button == 1) or (round_state.street == 3 and round_state.button == 0):
             board = round_state.board
             self.log.append(STREET_NAMES[round_state.street - 2] + ' ' + PCARDS(board) +
                             PVALUE(players[0].name, STARTING_STACK-round_state.stacks[0]) +

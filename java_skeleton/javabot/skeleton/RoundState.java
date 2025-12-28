@@ -54,7 +54,7 @@ public class RoundState extends State {
         int active = this.button % 2;
         if (this.street == 2 || this.street == 3) {
             // Only the player matching street % 2 can discard, the other can only check
-            return active == (this.street % 2)
+            return active != (this.street % 2)
                 ? new HashSet<ActionType>(Arrays.asList(ActionType.DISCARD_ACTION_TYPE))
                 : new HashSet<ActionType>(Arrays.asList(ActionType.CHECK_ACTION_TYPE));
         }
@@ -100,10 +100,13 @@ public class RoundState extends State {
         int newButton;
         if (this.street == 0) {
             newStreet = 2;
-            newButton = 0;  // Player A discards first, since they are in position
+            newButton = 1;  // Player B discards first, since they are out of position
+        } else if(this.street == 2) {
+            newStreet = 3;
+            newButton = 0;  // Player A discards second
         } else {
             newStreet = this.street + 1;
-            newButton = 1;
+            newButton = 1;  // Player B acts first after the discard phase
         }
         return new RoundState(newButton, newStreet, Arrays.asList(0, 0), this.stacks, this.hands, this.deck, this);
     }

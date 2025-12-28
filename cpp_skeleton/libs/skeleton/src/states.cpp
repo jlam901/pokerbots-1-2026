@@ -17,7 +17,7 @@ namespace pokerbots::skeleton {
     auto continueCost = pips[1 - active] - pips[active];
     if (street == 2 || street == 3) {
       // Only the player matching street % 2 can discard, the other can only check
-      return active == (street % 2)
+      return active != (street % 2)
         ? std::unordered_set<Action::Type>{ Action::Type::DISCARD }
         : std::unordered_set<Action::Type>{ Action::Type::CHECK };
     }
@@ -48,16 +48,19 @@ namespace pokerbots::skeleton {
 
   StatePtr RoundState::proceedStreet() const {
     if (street == 6) {
-      return this->showdown();
+        return this->showdown();
     }
     int newStreet;
     int newButton;
     if (street == 0) {
-      newStreet = 2;
-      newButton = 0;  // Player A discards first, since they are in position
+        newStreet = 2;
+        newButton = 1;  // Player B discards first, since they are out of position
+    } else if(street == 2) {
+        newStreet = 3;
+        newButton = 0;  // Player A discards second
     } else {
-      newStreet = street + 1;
-      newButton = 1;
+        newStreet = street + 1;
+        newButton = 1;  // Player B acts first after the discard phase
     }
     return std::make_shared<RoundState>(newButton, newStreet, std::array<int, 2>{0, 0}, stacks, hands, board, getShared());
   }

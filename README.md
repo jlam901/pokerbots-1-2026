@@ -6,27 +6,25 @@ This is the implementation of the engine for playing this year's poker variant, 
 ## Setup Instructions
 Our engine runs in Python, and to make setup as smooth as possible we can make use of [`uv`](https://docs.astral.sh/uv/), a powerful tool which handles package management, virtual environments, etc.
 
-<span style="opacity: 0.57;"><u>__NOTE: We strongly recommend trying out `uv` even if you are already familiar with tools such as `pip` and `pyenv`__</u></span>
+> <u>__NOTE: We strongly recommend trying out `uv` even if you are already familiar with tools such as `pip` and `pyenv`__</u>
 
 To install `uv`, you can use the following:
 
 ```bash
-#!/bin/bash
-
 # macOS or Linux
 curl -LsSf https://astral.sh/uv/install.sh | sh 
 
-# Windows
+# Windows (Powershell)
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
 Now, after installing `uv` and cloning the repo, run the following commands inside the repo:
 
 ```bash
-#!/bin/bash
+# Create a virtual environment with a recent Python version chosen by uv
+uv venv
 
-# Create a virtual environment with any Python version if your choice >=3.8 (omitting the --python flag will use the most recent python version, which is ok)
-uv venv --python 3.x.x # e.g. 3.13.3
+# Optional: you can also use any Python version of your choice >=3.8, using e.g. `uv venv --python 3.13.3`
 
 # Sync the virtual environment with the given project files (pyproject.toml and uv.lock), which basically installs the dependencies:
 # - cython 3.2.3 (needed for pkrbot)
@@ -44,8 +42,6 @@ If you are writing a bot in C++, you should make sure that you have `C++17`, `cm
 There are many ways to install C++ and `cmake` on your machine, but ultimately you want to make sure that your versions are high enough with these commands:
 
 ```bash
-#!/bin/bash
-
 cmake --version   # should be 3.8 or higher
 
 # Check either g++ or clang++ depending on which compiler you are using
@@ -56,15 +52,29 @@ clang++ --version # should show something like Apple clang version 10.x or newer
 Now, to get `boost`, you can use the following:
 
 ```bash
-#!/bin/bash
+# Linux
+sudo apt-get install -y libboost-all-dev 
 
-sudo apt-get install libboost-all-dev # Linux
-brew install boost                    # macOS
-vcpkg install boost                   # Windows
+# macOS
+brew install boost                      
+
+# Windows (C++ bots must use WSL)
+wsl --install
+sudo apt update
+sudo apt install -y libboost-all-dev                   
 ```
 
-<span style="opacity: 0.57;">NOTE: For the macOS command to work, you must first install `brew`, with this command: `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`. Now brew should work as needed.
-</span>
+> NOTE: For the macOS command to work, you must first install `brew`, with this command:
+> 
+> ```bash
+> /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+> ```
+>
+> Now brew should work as needed. If boost is not auto-detected after installing with brew, use
+>
+> ```bash
+> cmake -DBOOST_ROOT=/opt/homebrew -DCMAKE_BUILD_TYPE=Debug ..
+> ```
 
 
 ### Java Specific Instructions
@@ -80,6 +90,11 @@ brew install --cask temurin
 ```
 
 It is also possible to download manually from: [Adoptium](https://adoptium.net).
+
+> NOTE: If java is not found after installing (macOS only), use: 
+> ```bash
+> echo 'export PATH="/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home/bin:$PATH"' >> ~/.zshrc
+> ```
 
 #### Linux
 You can simply run the commands below:

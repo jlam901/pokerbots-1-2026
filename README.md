@@ -11,6 +11,8 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Windows (INSTALL WINDOWS SUBSYSTEM FOR LINUX, I USED UBUNTU)
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+
 Now, after installing uv and cloning the repo, run the following commands inside the repo:
 
 # Create a virtual environment with a recent Python version chosen by uv
@@ -22,6 +24,7 @@ uv venv
 # - cython 3.2.3 (needed for pkrbot)
 # - pkrbot 1.0.4 (custom library used for hand evaluation)
 uv sync
+
 That's it! There is no need to download the necessary python versions beforehand since uv will attempt to find it and install it if necessary.
 
 Now, to finally run the engine, you can use the Python executable inside of the virtual environment (should be at <PROJECT_DIR>/.venv/bin/python) and run engine.py. To change the bots which are run, see config.py.

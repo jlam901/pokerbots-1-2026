@@ -26,6 +26,7 @@ Optional: you can also use any Python version of your choice >=3.8, using e.g. `
 # Sync the virtual environment with the given project files (pyproject.toml and uv.lock), which basically installs the dependencies:
 - cython 3.2.3 (needed for pkrbot)
 - pkrbot 1.0.4 (custom library used for hand evaluation)
+
 use:
 uv sync
 

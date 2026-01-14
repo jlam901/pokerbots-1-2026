@@ -9,6 +9,43 @@ from skeleton.runner import parse_args, run_bot
 
 import random
 
+def get_low(cards):
+    """
+    Given a list of cards, returns the lowest one.
+    """
+    id = 0
+    for i, card in enumerate(cards):
+        if card[0] < cards[id][0]:
+            id = i
+    return i
+
+
+def standardize(cards):
+    dic = {
+        str(i): i for i in range(2, 10)
+    }
+    dic["T"] = 10
+    dic["J"] = 11
+    dic["Q"] = 12
+    dic["K"] = 13
+    dic["A"] = 14
+
+    
+
+def handle_same_cards(mycards, comcards):
+    paired_indices = set()
+    mycards_ordered = sorted((value, idx) for idx, value in enumerate(mycards))
+
+    for card, i in mycards_ordered:
+        for com in comcards:
+            if card[0] == com[0]:
+                paired_indices.append(i)
+    
+    for card, i in mycards_ordered:
+        if i not in paired_indices:
+            return (len(paired_indices) > 0), i
+    return True, 0
+            
 
 class Player(Bot):
     '''
@@ -98,127 +135,53 @@ class Player(Bot):
         my_contribution = STARTING_STACK - my_stack
         # the number of chips your opponent has contributed to the pot
         opp_contribution = STARTING_STACK - opp_stack
-
-
-
-
-#change below here
-        #probablity of tossing a random card
-        alpha=0.20
-        #probability of raising
-        beta=0.25
-        #scale times opponent's bet (gamma>1)
-        gamma=4
-        #first action gamma
-        theta=2
-        #first action beta
-        phi=0.30
-        #probability of folding at any point
-        delta=0.05
-        rank = "23456789TJQKA"
-        rank_list=[]
-        starting_rank=-1
-        for i in rank:
-            starting_rank+=1
-            rank_list.append(starting_rank)
-        matching_cards=[]
-        matching_cards_count={}
-        for i in my_cards:
-            matching_cards_count[rank_list[rank.index(i[0])]]=1
-        for i in board_cards:
-            matching_cards_count[rank_list[rank.index(i[0])]]=1
-        for i in my_cards:
-            if i[0] not in matching_cards:
-                matching_cards.append(i[0])
-            else:
-                matching_cards_count[rank_list[rank.index(i[0])]]+=1
-        for i in board_cards:
-            if i[0] not in matching_cards:
-                matching_cards.append(rank_list[rank.index(i[0])])
-            else:
-                matching_cards_count[int(i[0])]+=1
-        for i in reversed(sorted(matching_cards_count.values())):
-            if i==4:
-                beta=1
-                theta = 100
-                gamma = 100
-                delta = 0
-                break
-            if i==3:
-                beta=0.9
-                theta = 5
-                gamma = 10
-                delta = 0
-                break
-            if i==2:
-                beta=0.5
-                delta = 0
-                break
-        if street!=1:
-            for i in board_cards:
-                if rank.index(i[0])>=rank.index("Q"):
-                    beta=0.7
-                    break
+        
+        ranks="234567889TJQKA"
         # Only use DiscardAction if it's in legal_actions (which already checks street)
         # legal_actions() returns DiscardAction only when street is 2 or 3
         if DiscardAction in legal_actions:
-            if random.random()<(1-alpha):
-                ranks = "23456789TJQKA" # order of ranks
-                rank_list = [-1, -1, -1] # uninitialized
+            if board_cards[0][1] == board_cards[1][1]:
+                suit_dict = {}
+                playable_cards = my_cards + board_cards
+                for i in playable_cards:
+                    if i[1] in suit_dict:
+                        count = suit_dict[i] + 1
+                    else:
+                        suit_dict[i] = 1
+                for i in suit_dict:
+                    if suit_dict[i] == 4:
+                        for 
 
-                for card in range(3): # loop through cards in hand
-                    rank_list[card] = ranks.index(my_cards[card][0]) # get rank of each card
+            # keep pair and discard from remaining
+            pair_exists, id = handle_same_cards(my_cards, board_cards)
+            return DiscardAction(id)
 
-                # find the card with the minimum rank
-                if rank_list[0] <= rank_list[1] and rank_list[0] <= rank_list[2]:
-                    return DiscardAction(0)
-                elif rank_list[1] <= rank_list[2]:
-                    return DiscardAction(1)
-                else:
-                    return DiscardAction(2)
-            #random discard
-            else:
-                random_discard=[0,1,2]
-                return DiscardAction(random.choice(random_discard))
-        #randomly folding
-        if random.random() <= delta and street != 1:
-            return FoldAction()
-        if CheckAction in legal_actions:  # check-call
-            if random.random()<=phi:
-                #raise
-                var = opp_pip
-                if opp_pip==0:
-                    var = opp_contribution + my_contribution
-                    return RaiseAction(min(min_raise + (theta * var - min_raise) * random.random(), max_raise))
-            else:
-                #return check-call
+            #discard worst
+            rank_list=[]
+            num_cards=len(my_cards)
+            for card in range(num_cards):
+                rank_list.append(ranks.index(my_cards[card][0]))
+            min_rank_idx=rank_list.index(min(rank_list))
+            return DiscardAction(min_rank_idx)
+        if street==0:
+            if CheckAction in legal_actions:
                 return CheckAction()
+            else:
+                return CallAction()
         if RaiseAction in legal_actions:
             # the smallest and largest numbers of chips for a legal bet/raise
             min_raise, max_raise = round_state.raise_bounds()
             min_cost = min_raise - my_pip  # the cost of a minimum bet/raise
             max_cost = max_raise - my_pip  # the cost of a maximum bet/raise
-            #bluffing
-            # if beta==0.7:
-
-            # #if round is preflop
-            if street==1:
-                if random.random() < phi:
-                    return RaiseAction(min(min_raise + (gamma * opp_pip - min_raise) * random.random(), max_raise))
-                else:
-                    return CallAction()
-            #if round is not preflop
-            else:
-                if random.random() < beta:
-                    return RaiseAction(min(min_raise + (gamma * opp_pip - min_raise) * random.random(), max_raise))
-                else:
-                    return CallAction()
-
+            l
+tseegr
+            for i in board_cards:
+                
+        if CheckAction in legal_actions:  # check-call
+            return CheckAction()
+        if random.random() < 0.25:
+            return FoldAction()
         return CallAction()
-
-
-
-
 
 
 if __name__ == '__main__':

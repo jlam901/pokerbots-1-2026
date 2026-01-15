@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pokerbots Game Visualization</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .game-info {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        
+        .player-info {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            min-width: 300px;
+            margin: 10px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .player-info h2 {
+            margin-bottom: 15px;
+            border-bottom: 2px solid white;
+            padding-bottom: 10px;
+        }
+        
+        .player-info.active {
+            background: rgba(255, 215, 0, 0.3);
+            border: 2px solid gold;
+        }
+        
+        .board-section {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 15px;
+            margin: 20px 0;
+            text-align: center;
+            backdrop-filter: blur(10px);
+        }
+        
+        .board-section h2 {
+            margin-bottom: 20px;
+        }
+        
+        .cards-container {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .card {
+            width: 80px;
+            height: 112px;
+            background: white;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            position: relative;
+            transition: transform 0.2s;
+        }
+        
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .card.red {
+            color: #d32f2f;
+        }
+        
+        .card.black {
+            color: #212121;
+        }
+        
+        .card-rank {
+            font-size: 24px;
+            font-weight: bold;
+        }
+        
+        .card-suit {
+            font-size: 36px;
+            text-align: center;
+        }
+        
+        .card-empty {
+            width: 80px;
+            height: 112px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px dashed rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+        }
+        
+        .action-panel {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 25px;
+            border-radius: 15px;
+            margin: 20px 0;
+            backdrop-filter: blur(10px);
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: bold;
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .btn-fold {
+            background: #d32f2f;
+            color: white;
+        }
+        
+        .btn-call {
+            background: #1976d2;
+            color: white;
+        }
+        
+        .btn-check {
+            background: #388e3c;
+            color: white;
+        }
+        
+        .btn-raise {
+            background: #f57c00;
+            color: white;
+        }
+        
+        .btn-discard {
+            background: #7b1fa2;
+            color: white;
+        }
+        
+        .btn-start {
+            background: #4caf50;
+            color: white;
+            font-size: 20px;
+            padding: 15px 30px;
+        }
+        
+        button:hover:not(:disabled) {
+            transform: scale(1.05);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+        
+        .raise-input {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .raise-input input {
+            padding: 10px;
+            border-radius: 5px;
+            border: none;
+            font-size: 16px;
+            width: 150px;
+        }
+        
+        .log {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 20px;
+            border-radius: 10px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 20px;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+            border-left: 3px solid #4caf50;
+            padding-left: 10px;
+        }
+        
+        .status {
+            text-align: center;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            margin: 20px 0;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🃏 Pokerbots Game Visualization 🃏</h1>
+        
+        <div class="status" id="status">Waiting to start game...</div>
+        
+        <div style="text-align: center; margin: 20px 0;">
+            <button class="btn-start" onclick="startGame()">Start Game</button>
+        </div>
+        
+        <div class="game-info">
+            <div class="player-info" id="player0">
+                <h2>Player A</h2>
+                <div>Stack: <span id="stack0">400</span></div>
+                <div>Bankroll: <span id="bankroll0">0</span></div>
+                <div>In Pot: <span id="pip0">0</span></div>
+                <div class="cards-container" id="cards0"></div>
+            </div>
+            
+            <div class="player-info" id="player1">
+                <h2>Player B</h2>
+                <div>Stack: <span id="stack1">400</span></div>
+                <div>Bankroll: <span id="bankroll1">0</span></div>
+                <div>In Pot: <span id="pip1">0</span></div>
+                <div class="cards-container" id="cards1"></div>
+            </div>
+        </div>
+        
+        <div class="board-section">
+            <h2 id="street-name">Pre-flop</h2>
+            <div class="cards-container" id="board-cards"></div>
+        </div>
+        
+        <div class="action-panel" id="action-panel" style="display: none;">
+            <h2>Your Turn - Choose an Action</h2>
+            <div id="legal-actions-info"></div>
+            <div class="action-buttons" id="action-buttons"></div>
+            <div class="raise-input" id="raise-input" style="display: none;">
+                <input type="number" id="raise-amount" placeholder="Raise amount" min="0">
+                <button class="btn-raise" onclick="submitRaise()">Confirm Raise</button>
+            </div>
+            <div class="action-buttons" id="discard-buttons" style="display: none;">
+                <p>Select a card to discard:</p>
+            </div>
+        </div>
+        
+        <div class="log" id="log"></div>
+    </div>
+    
+    <script>
+        const socket = io();
+        let currentLegalActions = [];
+        let myCards = [];
+        let waitingForAction = false;
+        let currentPlayerName = '';
+        
+        socket.on('connect', () => {
+            addLog('Connected to server');
+        });
+        
+        socket.on('connected', (data) => {
+            addLog(data.message);
+        });
+        
+        socket.on('game_started', (data) => {
+            addLog('Game started!');
+            document.getElementById('status').textContent = 'Game in progress...';
+        });
+        
+        socket.on('game_state', (data) => {
+            updateGameState(data);
+        });
+        
+        socket.on('action', (data) => {
+            addLog(`${data.player} ${data.action}${data.details.amount ? ' to ' + data.details.amount : ''}${data.details.card ? ' (' + data.details.card + ')' : ''}`);
+        });
+        
+        socket.on('request_action', (data) => {
+            waitingForAction = true;
+            currentLegalActions = data.legal_actions;
+            currentPlayerName = data.player;
+            myCards = data.round_state.hands[0] || [];
+            showActionPanel(data.legal_actions, data.round_state);
+        });
+        
+        socket.on('round_start', (data) => {
+            addLog(`=== Round ${data.round} ===`);
+        });
+        
+        socket.on('round_end', (data) => {
+            addLog(`Round ended. Deltas: A=${data.deltas[0]}, B=${data.deltas[1]}`);
+            hideActionPanel();
+        });
+        
+        socket.on('game_end', (data) => {
+            addLog('Game finished!');
+            document.getElementById('status').textContent = 'Game finished';
+        });
+        
+        socket.on('status_update', (data) => {
+            document.getElementById('status').textContent = data.message;
+            addLog(data.message);
+        });
+        
+        socket.on('error', (data) => {
+            document.getElementById('status').textContent = 'ERROR: ' + data.message;
+            addLog('ERROR: ' + data.message);
+            alert('Error: ' + data.message);
+        });
+        
+        function startGame() {
+            socket.emit('start_game');
+            document.querySelector('.btn-start').disabled = true;
+        }
+        
+        function updateGameState(data) {
+            // Update player info
+            for (let i = 0; i < 2; i++) {
+                document.getElementById(`stack${i}`).textContent = data.stacks[i];
+                document.getElementById(`bankroll${i}`).textContent = data.bankrolls[i];
+                document.getElementById(`pip${i}`).textContent = data.pips[i];
+                
+                const playerDiv = document.getElementById(`player${i}`);
+                if (data.active_player === i) {
+                    playerDiv.classList.add('active');
+                } else {
+                    playerDiv.classList.remove('active');
+                }
+                
+                // Update cards (only show if revealed)
+                const cardsContainer = document.getElementById(`cards${i}`);
+                cardsContainer.innerHTML = '';
+                if (data.hands && data.hands[i]) {
+                    data.hands[i].forEach(card => {
+                        if (card) {
+                            const cardDiv = createCardElement(card);
+                            cardsContainer.appendChild(cardDiv);
+                        }
+                    });
+                }
+            }
+            
+            // Update board
+            const boardContainer = document.getElementById('board-cards');
+            boardContainer.innerHTML = '';
+            if (data.board) {
+                data.board.forEach(card => {
+                    if (card) {
+                        const cardDiv = createCardElement(card);
+                        boardContainer.appendChild(cardDiv);
+                    }
+                });
+            }
+            
+            // Update street name
+            if (data.street_name) {
+                document.getElementById('street-name').textContent = data.street_name;
+            }
+        }
+        
+        function createCardElement(card) {
+            if (!card || !card.raw) {
+                const empty = document.createElement('div');
+                empty.className = 'card-empty';
+                return empty;
+            }
+            
+            const div = document.createElement('div');
+            div.className = `card ${card.color}`;
+            div.innerHTML = `
+                <div class="card-rank">${card.rank}</div>
+                <div class="card-suit">${card.suit}</div>
+            `;
+            return div;
+        }
+        
+        function showActionPanel(legalActions, roundState) {
+            const panel = document.getElementById('action-panel');
+            const buttonsDiv = document.getElementById('action-buttons');
+            const raiseInput = document.getElementById('raise-input');
+            const discardButtons = document.getElementById('discard-buttons');
+            const legalInfo = document.getElementById('legal-actions-info');
+            
+            panel.style.display = 'block';
+            buttonsDiv.innerHTML = '';
+            raiseInput.style.display = 'none';
+            discardButtons.innerHTML = '';
+            discardButtons.style.display = 'none';
+            
+            legalInfo.textContent = `Legal actions: ${legalActions.join(', ')}`;
+            
+            legalActions.forEach(action => {
+                if (action === 'FoldAction') {
+                    const btn = document.createElement('button');
+                    btn.className = 'btn-fold';
+                    btn.textContent = 'Fold';
+                    btn.onclick = () => submitAction('Fold');
+                    buttonsDiv.appendChild(btn);
+                } else if (action === 'CallAction') {
+                    const btn = document.createElement('button');
+                    btn.className = 'btn-call';
+                    btn.textContent = 'Call';
+                    btn.onclick = () => submitAction('Call');
+                    buttonsDiv.appendChild(btn);
+                } else if (action === 'CheckAction') {
+                    const btn = document.createElement('button');
+                    btn.className = 'btn-check';
+                    btn.textContent = 'Check';
+                    btn.onclick = () => submitAction('Check');
+                    buttonsDiv.appendChild(btn);
+                } else if (action === 'RaiseAction') {
+                    raiseInput.style.display = 'flex';
+                } else if (action === 'DiscardAction') {
+                    discardButtons.style.display = 'block';
+                    const p = document.createElement('p');
+                    p.textContent = 'Select a card to discard:';
+                    discardButtons.appendChild(p);
+                    
+                    if (roundState && roundState.hands && roundState.hands[0]) {
+                        roundState.hands[0].forEach((card, index) => {
+                            if (card) {
+                                const btn = document.createElement('button');
+                                btn.className = 'btn-discard';
+                                btn.innerHTML = `${card.rank}${card.suit} (${index})`;
+                                btn.onclick = () => submitAction('Discard', index);
+                                discardButtons.appendChild(btn);
+                            }
+                        });
+                    }
+                }
+            });
+        }
+        
+        function hideActionPanel() {
+            document.getElementById('action-panel').style.display = 'none';
+            waitingForAction = false;
+        }
+        
+        function submitAction(action, cardIndex = null) {
+            if (!waitingForAction) return;
+            
+            const data = { 
+                action: action,
+                player: currentPlayerName
+            };
+            if (action === 'Raise') {
+                const amount = parseInt(document.getElementById('raise-amount').value);
+                if (!amount || amount <= 0) {
+                    alert('Please enter a valid raise amount');
+                    return;
+                }
+                data.amount = amount;
+            } else if (action === 'Discard' && cardIndex !== null) {
+                data.card_index = cardIndex;
+            }
+            
+            socket.emit('player_action', data);
+            hideActionPanel();
+            addLog(`You chose: ${action}${data.amount ? ' to ' + data.amount : ''}${data.card_index !== null ? ' (card ' + data.card_index + ')' : ''}`);
+        }
+        
+        function submitRaise() {
+            submitAction('Raise');
+        }
+        
+        function addLog(message) {
+            const log = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.textContent = new Date().toLocaleTimeString() + ' - ' + message;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        }
+    </script>
+</body>
+</html>

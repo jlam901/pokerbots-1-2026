@@ -124,6 +124,42 @@ class Player(Bot):
                     if my_ranks.count(rank) == 3:
                         return DiscardAction(0)
             
+            # Check for sets (3 of a kind) or 4 of a kind where player's cards contribute
+            cards_in_sets = set()
+            for rank, count in rank_counts.items():
+                if count >= 3:  # Set (3 of a kind) or 4 of a kind
+                    # Check if at least one of our cards is part of this set/4 of a kind
+                    my_count_for_rank = my_ranks.count(rank)
+                    if my_count_for_rank > 0:
+                        # Mark which of our cards are part of this set/4 of a kind
+                        for i, my_rank in enumerate(my_ranks):
+                            if my_rank == rank:
+                                cards_in_sets.add(i)
+            
+            # If we have sets/4 of a kind, discard weakest card NOT in sets
+            if cards_in_sets:
+                weakest_index = None
+                weakest_rank_value = -1
+                
+                for i, rank in enumerate(my_ranks):
+                    if i not in cards_in_sets:  # This card is not part of any set/4 of a kind
+                        rank_value = rank_order.index(rank)
+                        if weakest_index is None or rank_value < weakest_rank_value:
+                            weakest_index = i
+                            weakest_rank_value = rank_value
+                
+                # If all cards are in sets, discard the weakest one overall
+                if weakest_index is None:
+                    weakest_index = 0
+                    weakest_rank_value = rank_order.index(my_ranks[0])
+                    for i, rank in enumerate(my_ranks):
+                        rank_value = rank_order.index(rank)
+                        if rank_value < weakest_rank_value:
+                            weakest_index = i
+                            weakest_rank_value = rank_value
+                
+                return DiscardAction(weakest_index)
+            
             # Check for flush draws (4 cards of the same suit)
             cards_in_flush_draw = set()
             suit_counts = {}
@@ -323,6 +359,7 @@ class Player(Bot):
     def evaluate_hand_strength(self, my_cards, board_cards):
         """
         Evaluate the best 5-card hand from my_cards + board_cards.
+        Only counts combinations where player's cards contribute.
         Returns: 'set_flush_straight', 'top_pair', 'mid_pair', 'any_pair', 'nothing'
         """
         if not board_cards:
@@ -339,52 +376,90 @@ class Player(Bot):
         # Extract ranks and suits
         all_ranks = [card[0] for card in all_cards]
         all_suits = [card[1] for card in all_cards]
+        my_ranks = [card[0] for card in my_cards]
+        my_suits = [card[1] for card in my_cards]
+        board_ranks = [card[0] for card in board_cards]
+        board_suits = [card[1] for card in board_cards]
         
-        # Check for flush (5 cards of same suit)
-        suit_counts = {}
-        for suit in all_suits:
-            suit_counts[suit] = suit_counts.get(suit, 0) + 1
-        has_flush = any(count >= 5 for count in suit_counts.values())
+        # Check for sets (3 of a kind) - must have at least one of our cards
+        rank_counts_all = {}
+        rank_counts_my = {}
+        for rank in all_ranks:
+            rank_counts_all[rank] = rank_counts_all.get(rank, 0) + 1
+        for rank in my_ranks:
+            rank_counts_my[rank] = rank_counts_my.get(rank, 0) + 1
         
-        # Check for straight
-        rank_values = sorted(set([rank_to_value[rank] for rank in all_ranks]))
-        has_straight = False
-        if len(rank_values) >= 5:
-            # Check for 5 consecutive ranks
-            for i in range(len(rank_values) - 4):
-                if rank_values[i+4] - rank_values[i] == 4:
-                    has_straight = True
+        # Check if we have a set (3 of a kind) where our cards contribute
+        has_set = False
+        for rank, count_all in rank_counts_all.items():
+            if count_all >= 3:
+                # Check if at least one of our cards is part of this set
+                if rank in rank_counts_my and rank_counts_my[rank] > 0:
+                    has_set = True
                     break
+        
+        # Check for flush (5 cards of same suit) - must have at least one of our cards
+        suit_counts_all = {}
+        suit_counts_my = {}
+        for suit in all_suits:
+            suit_counts_all[suit] = suit_counts_all.get(suit, 0) + 1
+        for suit in my_suits:
+            suit_counts_my[suit] = suit_counts_my.get(suit, 0) + 1
+        
+        has_flush = False
+        flush_suit = None
+        for suit, count_all in suit_counts_all.items():
+            if count_all >= 5:
+                # Check if at least one of our cards is part of this flush
+                if suit in suit_counts_my and suit_counts_my[suit] > 0:
+                    has_flush = True
+                    flush_suit = suit
+                    break
+        
+        # Check for straight - must have at least one of our cards
+        rank_values_all = sorted(set([rank_to_value[rank] for rank in all_ranks]))
+        my_rank_values = set([rank_to_value[rank] for rank in my_ranks])
+        has_straight = False
+        straight_ranks = []
+        
+        if len(rank_values_all) >= 5:
+            # Check for 5 consecutive ranks
+            for i in range(len(rank_values_all) - 4):
+                consecutive = rank_values_all[i:i+5]
+                if consecutive[-1] - consecutive[0] == 4:
+                    # Check if at least one of our cards is in this straight
+                    if any(rv in my_rank_values for rv in consecutive):
+                        has_straight = True
+                        straight_ranks = [rank_order[rv] for rv in consecutive]
+                        break
+            
             # Check for A-2-3-4-5 straight (wheel)
             if not has_straight:
-                wheel_ranks = [rank_to_value['A'], rank_to_value['2'], rank_to_value['3'], 
+                wheel_values = [rank_to_value['A'], rank_to_value['2'], rank_to_value['3'], 
                               rank_to_value['4'], rank_to_value['5']]
-                if all(rv in rank_values for rv in wheel_ranks):
-                    has_straight = True
-        
-        # Check for sets (3 of a kind) and pairs
-        rank_counts = {}
-        for rank in all_ranks:
-            rank_counts[rank] = rank_counts.get(rank, 0) + 1
-        
-        # Find sets (3 of a kind)
-        sets = [rank for rank, count in rank_counts.items() if count >= 3]
-        has_set = len(sets) > 0
+                if all(rv in rank_values_all for rv in wheel_values):
+                    # Check if at least one of our cards is in this straight
+                    if any(rv in my_rank_values for rv in wheel_values):
+                        has_straight = True
         
         # Determine hand strength - check best hands first
         if has_set or has_flush or has_straight:
             return 'set_flush_straight'
         
-        # Find pairs
-        pairs = [rank for rank, count in rank_counts.items() if count == 2]
+        # Find pairs - must have at least one of our cards
+        pairs = []
+        for rank, count_all in rank_counts_all.items():
+            if count_all == 2:
+                # Check if at least one of our cards is part of this pair
+                if rank in rank_counts_my and rank_counts_my[rank] > 0:
+                    pairs.append(rank)
+        
         if not pairs:
             return 'nothing'
         
         pairs.sort(key=lambda r: rank_to_value[r], reverse=True)  # Sort by rank, highest first
         
-        # Check which pairs we have (need to see if our cards make the pair)
-        board_ranks = [card[0] for card in board_cards]
-        my_ranks = [card[0] for card in my_cards]
+        # Check which pairs we have
         board_rank_values = sorted([rank_to_value[r] for r in board_ranks], reverse=True) if board_ranks else []
         
         # Check if we have a pair with the highest board card (top pair)
@@ -393,22 +468,19 @@ class Player(Bot):
             highest_board_rank = rank_order[highest_board_rank_val]
             
             # Check if we have a pair with the highest board card
-            if highest_board_rank in pairs and highest_board_rank in my_ranks:
+            if highest_board_rank in pairs:
                 return 'top_pair'
             
             # Check for mid pair (2nd highest board card)
             if len(board_rank_values) >= 2:
                 second_highest_board_rank_val = board_rank_values[1]
                 second_highest_board_rank = rank_order[second_highest_board_rank_val]
-                if second_highest_board_rank in pairs and second_highest_board_rank in my_ranks:
+                if second_highest_board_rank in pairs:
                     return 'mid_pair'
         
         # If we have any pair (but not top or mid pair)
         if pairs:
-            # Check if any of our cards are in the pairs
-            for pair_rank in pairs:
-                if pair_rank in my_ranks:
-                    return 'any_pair'
+            return 'any_pair'
         
         return 'nothing'
 

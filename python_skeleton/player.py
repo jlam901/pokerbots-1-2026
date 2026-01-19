@@ -234,70 +234,65 @@ class Player(Bot):
             # Evaluate hand strength
             hand_strength = self.evaluate_hand_strength(my_cards, board_cards)
             
-            # If opponent has raised (continue_cost > 0), decide whether to call or fold
+            # Determine target contribution for this round based on hand strength
+            if hand_strength == 'set_flush_straight':
+                target_contribution = 50
+            elif hand_strength == 'top_pair':
+                target_contribution = 30
+            elif hand_strength == 'mid_pair':
+                target_contribution = 10
+            else:  # any_pair or nothing
+                target_contribution = 0
+            
+            # If opponent has raised (continue_cost > 0)
             if continue_cost > 0:
-                if hand_strength == 'set_flush_straight':
-                    # Always call with set/flush/straight
-                    return CallAction()
-                elif hand_strength == 'top_pair':
-                    # Always call with top pair
-                    return CallAction()
-                elif hand_strength == 'mid_pair':
-                    # Always call with mid pair
-                    return CallAction()
-                elif hand_strength == 'any_pair':
-                    # Always call with any pair
-                    return CallAction()
-                elif hand_strength == 'nothing':
-                    # Call if continue_cost < 10, or fold on 2nd to last street if continue_cost > 0
-                    # Streets: 0=preflop, 4=post-discard, 5=turn, 6=river
-                    # 2nd to last street would be turn (5) if we're on river (6)
-                    is_second_to_last = (street == 5)  # Turn is 2nd to last before river
+                # For weak hands, apply fold logic
+                if hand_strength == 'any_pair' or hand_strength == 'nothing':
                     if continue_cost < 10:
                         return CallAction()
-                    elif is_second_to_last and continue_cost > 0:
+                    elif street == 4:
+                        if continue_cost > 15:
+                            return FoldAction()
+                        else:
+                            return CallAction()
+                    elif (street == 5 or street == 6): # 2nd to last street would be turn (5) if we're on river (6)
                         return FoldAction()
                     else:
                         return CallAction()
-                else:
+                
+                # For strong hands, we want our contribution to be >= target_contribution
+                # Call would make our contribution = opp_pip
+                # We want: max(opp_pip, target_contribution)
+                call_contribution = opp_pip
+                desired_contribution = max(call_contribution, target_contribution)
+                
+                if desired_contribution <= call_contribution:
+                    # Just calling meets our target
                     return CallAction()
+                else:
+                    # We need to raise to meet our target
+                    # Raise amount (absolute) should be desired_contribution
+                    raise_amount = desired_contribution
+                    # But we must respect minimum raise amount
+                    raise_amount = max(raise_amount, min_raise)
+                    # And we can't exceed maximum raise
+                    raise_amount = min(raise_amount, max_raise)
+                    return RaiseAction(raise_amount)
             
             # If we can bet/raise (continue_cost == 0)
-            if hand_strength == 'set_flush_straight':
-                # Raise by 50, or all-in if pot > 200
-                if pot_size > 200:
-                    return RaiseAction(max_raise)  # All in
-                else:
-                    raise_amount = min(my_pip + 50, max_raise)
-                    raise_amount = max(raise_amount, min_raise)  # Ensure at least min_raise
-                    return RaiseAction(raise_amount)
-            elif hand_strength == 'top_pair':
-                # Bet 30, or all-in if pot > 200
-                if pot_size > 200:
-                    return RaiseAction(max_raise)  # All in
-                else:
-                    raise_amount = min(my_pip + 30, max_raise)
-                    raise_amount = max(raise_amount, min_raise)  # Ensure at least min_raise
-                    return RaiseAction(raise_amount)
-            elif hand_strength == 'mid_pair':
-                # Bet 10
-                raise_amount = min(my_pip + 10, max_raise)
-                raise_amount = max(raise_amount, min_raise)  # Ensure at least min_raise
-                return RaiseAction(raise_amount)
-            elif hand_strength == 'any_pair':
-                # Just call (check if possible, otherwise call)
+            if target_contribution == 0:
+                # Just check if possible, otherwise call
                 if CheckAction in legal_actions:
                     return CheckAction()
                 return CallAction()
-            elif hand_strength == 'nothing':
-                # Call if continue_cost < 10 (but continue_cost is 0 here, so check)
-                if CheckAction in legal_actions:
-                    return CheckAction()
-                return CallAction()
-            else:
-                if CheckAction in legal_actions:
-                    return CheckAction()
-                return CallAction()
+            
+            # We want to raise to target_contribution
+            raise_amount = target_contribution
+            # But we must respect minimum raise amount
+            raise_amount = max(raise_amount, min_raise)
+            # And we can't exceed maximum raise
+            raise_amount = min(raise_amount, max_raise)
+            return RaiseAction(raise_amount)
         
         if CheckAction in legal_actions:  # check-call
             return CheckAction()
@@ -305,15 +300,19 @@ class Player(Bot):
         # If we need to call and have nothing, check conditions
         if continue_cost > 0:
             hand_strength = self.evaluate_hand_strength(my_cards, board_cards)
-            if hand_strength == 'nothing':
+            if hand_strength == 'nothing' or hand_strength == 'any_pair':
+                # Treat any_pair the same as nothing
                 # Call if continue_cost < 10, or fold on 2nd to last street if continue_cost > 0
-                is_second_to_last = (street == 5)  # Turn is 2nd to last before river
                 if continue_cost < 10:
                     return CallAction()
-                elif is_second_to_last and continue_cost > 0:
+                elif street == 4:
+                    if continue_cost > 15:
+                        return FoldAction()
+                elif (street == 5 or street == 6): # 2nd to last street would be turn (5) if we're on river (6)
                     return FoldAction()
                 else:
                     return CallAction()
+
             else:
                 # Always call with any hand strength
                 return CallAction()

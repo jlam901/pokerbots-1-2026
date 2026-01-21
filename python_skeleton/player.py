@@ -8,6 +8,7 @@ from skeleton.bot import Bot
 from skeleton.runner import parse_args, run_bot
 
 import random
+import math
 
 
 class Player(Bot):
@@ -25,7 +26,20 @@ class Player(Bot):
         Returns:
         Nothing.
         '''
-        pass
+        # Table: street -> hand_strength -> {'sum': total_contribution, 'count': observations}
+        self.opp_behavior_table = {}
+        for st in [0, 2, 3, 4, 5, 6]:
+            self.opp_behavior_table[st] = {
+                'quads': {'sum': 0.0, 'count': 0},
+                'fullhouse': {'sum': 0.0, 'count': 0},
+                'flush': {'sum': 0.0, 'count': 0},
+                'straight': {'sum': 0.0, 'count': 0},
+                'set': {'sum': 0.0, 'count': 0},
+                'top_pair': {'sum': 0.0, 'count': 0},
+                'mid_pair': {'sum': 0.0, 'count': 0},
+                'any_pair': {'sum': 0.0, 'count': 0},
+                'nothing': {'sum': 0.0, 'count': 0},
+            }
 
     def handle_new_round(self, game_state, round_state, active):
         '''
@@ -65,7 +79,9 @@ class Player(Bot):
         my_cards = previous_state.hands[active]  # your cards
         # opponent's cards or [] if not revealed
         opp_cards = previous_state.hands[1-active]
-        pass
+        # Update opponent behavior table only if their hand is revealed
+        if opp_cards:
+            self._update_opponent_behavior(previous_state, opp_cards, 1 - active)
 
     def get_action(self, game_state, round_state, active):
         '''
@@ -81,6 +97,19 @@ class Player(Bot):
         Your action.
         '''
         legal_actions = round_state.legal_actions()  # the actions you are allowed to take
+        
+        # PRIORITY CHECK: If cumulative delta exceeds threshold, fold at soonest possible moment
+        cumulative_delta = game_state.bankroll  # Total chips gained/lost from previous rounds
+        remaining_rounds = NUM_ROUNDS - game_state.round_num + 1  # +1 because round_num is 1-indexed
+        threshold = math.ceil((remaining_rounds / 2) * 3)
+        
+        if cumulative_delta > threshold:
+            # Fold at the soonest possible moment (highest priority)
+            if FoldAction in legal_actions:
+                return FoldAction()
+            # If we can't fold yet (e.g., during discard phase), wait for next opportunity
+            # But we'll still fold as soon as possible
+        
         # 0, 3, 4, or 5 representing pre-flop, flop, turn, or river respectively
         street = round_state.street
         my_cards = round_state.hands[active]  # your cards
@@ -234,20 +263,57 @@ class Player(Bot):
             # Evaluate hand strength
             hand_strength = self.evaluate_hand_strength(my_cards, board_cards)
             
-            # Determine target contribution for this round based on hand strength
-            if hand_strength == 'set_flush_straight':
+            # After 100 rounds, estimate opponent's hand and adjust strategy
+            adjusted_strength = hand_strength
+            opp_estimated_strength = None
+            if game_state.round_num > 100:
+                opp_estimated_strength = self.opponent_hand_estimator(opp_pip, street, board_cards)
+                comparison = self._compare_hand_strengths(hand_strength, opp_estimated_strength)
+                
+                if comparison < 0:  # Opponent is better
+                    # Use betting logic for one strength below ours
+                    adjusted_strength = self._get_strength_one_below(hand_strength)
+                # If we're better or equal, use our actual strength
+            
+            # Determine target contribution for this round based on adjusted hand strength
+            if adjusted_strength == 'quads':
+                target_contribution = 60
+            elif adjusted_strength == 'fullhouse':
+                target_contribution = 60
+            elif adjusted_strength == 'flush':
+                target_contribution = 55
+            elif adjusted_strength == 'straight':
                 target_contribution = 50
-            elif hand_strength == 'top_pair':
+            elif adjusted_strength == 'set':
+                target_contribution = 45
+            elif adjusted_strength == 'top_pair':
                 target_contribution = 30
-            elif hand_strength == 'mid_pair':
+            elif adjusted_strength == 'mid_pair':
                 target_contribution = 10
             else:  # any_pair or nothing
                 target_contribution = 0
             
+            # Special logic: if we have top pair or mid pair, and opponent could have 5 combo draw, and opponent is worse/equal, increase target to 70
+            if game_state.round_num > 100 and opp_estimated_strength:
+                if (hand_strength == 'top_pair' or hand_strength == 'mid_pair') and \
+                   self._opponent_could_have_five_combo_draw(board_cards):
+                    comparison = self._compare_hand_strengths(hand_strength, opp_estimated_strength)
+                    if comparison >= 0:  # We're better or equal
+                        target_contribution = 70
+            
             # If opponent has raised (continue_cost > 0)
             if continue_cost > 0:
+                # If we estimated opponent is better and we're worse, apply special logic
+                if game_state.round_num > 100 and opp_estimated_strength and \
+                   self._compare_hand_strengths(hand_strength, opp_estimated_strength) < 0:
+                    # Never call above 10, fold if continue_cost > 10
+                    if continue_cost > 10:
+                        return FoldAction()
+                    elif continue_cost <= 10:
+                        return CallAction()
+                
                 # For weak hands, apply fold logic
-                if hand_strength == 'any_pair' or hand_strength == 'nothing':
+                if adjusted_strength == 'any_pair' or adjusted_strength == 'nothing':
                     if continue_cost < 10:
                         return CallAction()
                     elif street == 4:
@@ -300,6 +366,19 @@ class Player(Bot):
         # If we need to call and have nothing, check conditions
         if continue_cost > 0:
             hand_strength = self.evaluate_hand_strength(my_cards, board_cards)
+            
+            # After 100 rounds, estimate opponent's hand and adjust strategy
+            if game_state.round_num > 100:
+                opp_estimated_strength = self.opponent_hand_estimator(opp_pip, street, board_cards)
+                comparison = self._compare_hand_strengths(hand_strength, opp_estimated_strength)
+                
+                # If we're worse than opponent, never call above 10
+                if comparison < 0:
+                    if continue_cost > 10:
+                        return FoldAction()
+                    elif continue_cost <= 10:
+                        return CallAction()
+            
             if hand_strength == 'nothing' or hand_strength == 'any_pair':
                 # Treat any_pair the same as nothing
                 # Call if continue_cost < 10, or fold on 2nd to last street if continue_cost > 0
@@ -322,7 +401,8 @@ class Player(Bot):
     def evaluate_hand_strength(self, my_cards, board_cards):
         """
         Evaluate the best 5-card hand from my_cards + board_cards.
-        Returns: 'set_flush_straight', 'top_pair', 'mid_pair', 'any_pair', 'nothing'
+        Returns: 'quads', 'fullhouse', 'flush', 'straight', 'set', 'top_pair', 'mid_pair', 'any_pair', 'nothing'
+        Power order: set < straight < flush < fullhouse < quads
         """
         if not board_cards:
             # Pre-flop: can only have pairs from hole cards
@@ -338,43 +418,80 @@ class Player(Bot):
         # Extract ranks and suits
         all_ranks = [card[0] for card in all_cards]
         all_suits = [card[1] for card in all_cards]
+        my_ranks = [card[0] for card in my_cards]
+        my_suits = [card[1] for card in my_cards]
         
-        # Check for flush (5 cards of same suit)
+        # Count ranks and suits
+        rank_counts = {}
+        for rank in all_ranks:
+            rank_counts[rank] = rank_counts.get(rank, 0) + 1
+        
         suit_counts = {}
         for suit in all_suits:
             suit_counts[suit] = suit_counts.get(suit, 0) + 1
-        has_flush = any(count >= 5 for count in suit_counts.values())
         
-        # Check for straight
+        # Check for quads (4 of a kind) - must have at least one of our cards
+        for rank, count in rank_counts.items():
+            if count >= 4:
+                if any(my_rank == rank for my_rank in my_ranks):
+                    return 'quads'
+        
+        # Check for full house (3 of a kind + pair) - must have at least one of our cards
+        sets = [rank for rank, count in rank_counts.items() if count >= 3]
+        pairs = [rank for rank, count in rank_counts.items() if count >= 2]
+        has_fullhouse = False
+        if sets and pairs:
+            # Check if we contribute to the set or the pair
+            for set_rank in sets:
+                if any(my_rank == set_rank for my_rank in my_ranks):
+                    has_fullhouse = True
+                    break
+            if not has_fullhouse:
+                for pair_rank in pairs:
+                    if pair_rank not in sets and any(my_rank == pair_rank for my_rank in my_ranks):
+                        has_fullhouse = True
+                        break
+        if has_fullhouse:
+            return 'fullhouse'
+        
+        # Check for flush (5 cards of same suit) - must have at least one of our cards
+        flush_suit = None
+        for suit, count in suit_counts.items():
+            if count >= 5:
+                if any(my_suit == suit for my_suit in my_suits):
+                    flush_suit = suit
+                    break
+        if flush_suit:
+            return 'flush'
+        
+        # Check for straight - must have at least one of our cards
         rank_values = sorted(set([rank_to_value[rank] for rank in all_ranks]))
         has_straight = False
         if len(rank_values) >= 5:
             # Check for 5 consecutive ranks
             for i in range(len(rank_values) - 4):
-                if rank_values[i+4] - rank_values[i] == 4:
-                    has_straight = True
-                    break
+                straight_segment = rank_values[i:i+5]
+                if straight_segment[-1] - straight_segment[0] == 4:
+                    # Check if at least one of our cards contributes
+                    if any(rank_to_value[my_rank] in straight_segment for my_rank in my_ranks):
+                        has_straight = True
+                        break
             # Check for A-2-3-4-5 straight (wheel)
             if not has_straight:
-                wheel_ranks = [rank_to_value['A'], rank_to_value['2'], rank_to_value['3'], 
+                wheel_ranks_values = [rank_to_value['A'], rank_to_value['2'], rank_to_value['3'], 
                               rank_to_value['4'], rank_to_value['5']]
-                if all(rv in rank_values for rv in wheel_ranks):
-                    has_straight = True
+                if all(rv in rank_values for rv in wheel_ranks_values):
+                    if any(rank_to_value[my_rank] in wheel_ranks_values for my_rank in my_ranks):
+                        has_straight = True
+        if has_straight:
+            return 'straight'
         
-        # Check for sets (3 of a kind) and pairs
-        rank_counts = {}
-        for rank in all_ranks:
-            rank_counts[rank] = rank_counts.get(rank, 0) + 1
+        # Check for set (3 of a kind) - must have at least one of our cards
+        for set_rank in sets:
+            if any(my_rank == set_rank for my_rank in my_ranks):
+                return 'set'
         
-        # Find sets (3 of a kind)
-        sets = [rank for rank, count in rank_counts.items() if count >= 3]
-        has_set = len(sets) > 0
-        
-        # Determine hand strength - check best hands first
-        if has_set or has_flush or has_straight:
-            return 'set_flush_straight'
-        
-        # Find pairs
+        # Find pairs (excluding sets)
         pairs = [rank for rank, count in rank_counts.items() if count == 2]
         if not pairs:
             return 'nothing'
@@ -383,7 +500,6 @@ class Player(Bot):
         
         # Check which pairs we have (need to see if our cards make the pair)
         board_ranks = [card[0] for card in board_cards]
-        my_ranks = [card[0] for card in my_cards]
         board_rank_values = sorted([rank_to_value[r] for r in board_ranks], reverse=True) if board_ranks else []
         
         # Check if we have a pair with the highest board card (top pair)
@@ -403,13 +519,259 @@ class Player(Bot):
                     return 'mid_pair'
         
         # If we have any pair (but not top or mid pair)
-        if pairs:
-            # Check if any of our cards are in the pairs
-            for pair_rank in pairs:
-                if pair_rank in my_ranks:
-                    return 'any_pair'
+        for pair_rank in pairs:
+            if pair_rank in my_ranks:
+                return 'any_pair'
         
         return 'nothing'
+
+    # ---------------- Opponent behavior tracking ---------------- #
+
+    def _compare_hand_strengths(self, strength1, strength2):
+        """
+        Compare two hand strengths. Returns:
+        - 1 if strength1 > strength2
+        - -1 if strength1 < strength2
+        - 0 if strength1 == strength2
+        Power order: set < straight < flush < fullhouse < quads
+        """
+        strength_order = {
+            'quads': 8,
+            'fullhouse': 7,
+            'flush': 6,
+            'straight': 5,
+            'set': 4,
+            'top_pair': 3,
+            'mid_pair': 2,
+            'any_pair': 1,
+            'nothing': 0
+        }
+        val1 = strength_order.get(strength1, 0)
+        val2 = strength_order.get(strength2, 0)
+        if val1 > val2:
+            return 1
+        elif val1 < val2:
+            return -1
+        return 0
+
+    def _get_strength_one_below(self, strength):
+        """
+        Get the hand strength one level below the given strength.
+        """
+        strength_hierarchy = ['quads', 'fullhouse', 'flush', 'straight', 'set', 'top_pair', 'mid_pair', 'any_pair', 'nothing']
+        try:
+            idx = strength_hierarchy.index(strength)
+            if idx < len(strength_hierarchy) - 1:
+                return strength_hierarchy[idx + 1]
+        except ValueError:
+            pass
+        return strength  # Return same if can't go lower
+
+    def _update_behavior_table(self, street, strength, contribution):
+        """
+        Update running mean table for opponent contributions per street and strength.
+        """
+        table_for_street = self.opp_behavior_table.get(street)
+        if not table_for_street:
+            return
+        entry = table_for_street.get(strength)
+        if entry is None:
+            return
+        entry['sum'] += contribution
+        entry['count'] += 1
+
+    def _update_opponent_behavior(self, final_round_state, opp_cards, opp_index):
+        """
+        Walk the round_state history, capture opponent contribution per street, and
+        record the observed strength (using the same evaluator) at each street.
+        Only called when opponent's hand is revealed.
+        """
+        # Traverse full history
+        states = []
+        cur = final_round_state
+        while isinstance(cur, RoundState):
+            states.append(cur)
+            cur = cur.previous_state
+        states.reverse()  # chronological
+
+        # Keep the last state per street (final contribution on that street)
+        street_state = {}
+        for st in states:
+            street_state[st.street] = st
+
+        for street, state in street_state.items():
+            opp_pip = state.pips[opp_index] if hasattr(state, 'pips') else 0
+            board = state.board if hasattr(state, 'board') else []
+            strength = self.evaluate_hand_strength(list(opp_cards), list(board))
+            self._update_behavior_table(street, strength, opp_pip)
+
+    def _get_possible_hands_from_board(self, board_cards):
+        """
+        Given the board, return all possible 5-card combo hands that could be made.
+        Returns a list of possible hand strengths in order of likelihood.
+        """
+        if not board_cards:
+            return ['nothing', 'any_pair', 'mid_pair', 'top_pair', 'set', 'straight', 'flush', 'fullhouse', 'quads']
+        
+        rank_order = "23456789TJQKA"
+        rank_to_value = {rank: i for i, rank in enumerate(rank_order)}
+        
+        board_ranks = [card[0] for card in board_cards]
+        board_suits = [card[1] for card in board_cards]
+        
+        possible_hands = []
+        
+        # Count ranks and suits on board
+        rank_counts = {}
+        for rank in board_ranks:
+            rank_counts[rank] = rank_counts.get(rank, 0) + 1
+        
+        suit_counts = {}
+        for suit in board_suits:
+            suit_counts[suit] = suit_counts.get(suit, 0) + 1
+        
+        # Check for possible quads (4 of same rank on board)
+        if any(count >= 4 for count in rank_counts.values()):
+            possible_hands.append('quads')
+        
+        # Check for possible full house (3 of one rank + 2 of another, or 3 of one rank on board)
+        if any(count >= 3 for count in rank_counts.values()):
+            if any(count >= 2 for rank, count in rank_counts.items() if count < 3):
+                possible_hands.append('fullhouse')
+            elif len(board_cards) >= 4:  # Could pair with hole card
+                possible_hands.append('fullhouse')
+        
+        # Check for possible flush (4+ cards of same suit)
+        if any(count >= 4 for count in suit_counts.values()):
+            possible_hands.append('flush')
+        
+        # Check for possible straight (4 consecutive ranks)
+        board_rank_values = sorted(set([rank_to_value[rank] for rank in board_ranks]))
+        if len(board_rank_values) >= 4:
+            for i in range(len(board_rank_values) - 3):
+                if board_rank_values[i+3] - board_rank_values[i] <= 4:
+                    possible_hands.append('straight')
+                    break
+        
+        # Check for possible set (3 of same rank on board)
+        if any(count >= 3 for count in rank_counts.values()):
+            possible_hands.append('set')
+        
+        # Always possible to have pairs
+        if any(count >= 2 for count in rank_counts.values()):
+            possible_hands.append('top_pair')
+            possible_hands.append('mid_pair')
+            possible_hands.append('any_pair')
+        
+        possible_hands.append('nothing')
+        
+        # Return unique hands, ordered by strength
+        strength_order = {
+            'quads': 8, 'fullhouse': 7, 'flush': 6, 'straight': 5, 'set': 4,
+            'top_pair': 3, 'mid_pair': 2, 'any_pair': 1, 'nothing': 0
+        }
+        unique_hands = []
+        seen = set()
+        for hand in sorted(possible_hands, key=lambda h: strength_order.get(h, 0), reverse=True):
+            if hand not in seen:
+                unique_hands.append(hand)
+                seen.add(hand)
+        
+        return unique_hands if unique_hands else ['nothing']
+
+    def opponent_hand_estimator(self, opp_contribution, street, board_cards):
+        """
+        Estimate opponent hand strength given their current contribution (pips), street, and board.
+        Returns the most likely POSSIBLE hand based on board config and contribution pattern.
+        """
+        # Get possible hands from board
+        possible_hands = self._get_possible_hands_from_board(board_cards)
+        
+        table_for_street = self.opp_behavior_table.get(street)
+        if not table_for_street:
+            # Return strongest possible hand if no data
+            return possible_hands[0] if possible_hands else 'nothing'
+
+        best_strength = 'nothing'
+        best_diff = float('inf')
+        
+        # Only consider hands that are possible given the board
+        for strength in possible_hands:
+            data = table_for_street.get(strength)
+            if not data or data['count'] == 0:
+                continue
+            mean_contribution = data['sum'] / data['count']
+            diff = abs(opp_contribution - mean_contribution)
+            if diff < best_diff:
+                best_diff = diff
+                best_strength = strength
+
+        # If no match found, return strongest possible hand
+        if best_strength == 'nothing' and possible_hands:
+            return possible_hands[0]
+        
+        return best_strength
+
+    def _opponent_could_have_five_combo_draw(self, board_cards):
+        """
+        Check if it's mathematically possible for the opponent to have a 5 combo draw
+        (1 card away from quads, fullhouse, flush, straight, or set) based on the board alone.
+        Returns True if the board configuration makes it possible for opponent to have such a draw.
+        """
+        if not board_cards or len(board_cards) < 2:
+            return False
+        
+        rank_order = "23456789TJQKA"
+        rank_to_value = {rank: i for i, rank in enumerate(rank_order)}
+        
+        board_ranks = [card[0] for card in board_cards]
+        board_suits = [card[1] for card in board_cards]
+        
+        # Count ranks and suits on board
+        rank_counts = {}
+        for rank in board_ranks:
+            rank_counts[rank] = rank_counts.get(rank, 0) + 1
+        
+        suit_counts = {}
+        for suit in board_suits:
+            suit_counts[suit] = suit_counts.get(suit, 0) + 1
+        
+        # Check for quads draw possibility (3 of a kind on board - opponent could pair it)
+        for rank, count in rank_counts.items():
+            if count == 3:
+                return True  # Opponent could have the 4th card
+        
+        # Check for full house draw possibility
+        pairs = [rank for rank, count in rank_counts.items() if count == 2]
+        sets = [rank for rank, count in rank_counts.items() if count >= 3]
+        # If there's a pair and a set, or 2 pairs, opponent could complete full house
+        if (sets and pairs) or len(pairs) >= 2:
+            return True
+        # If there's a set, opponent could pair any other rank
+        if sets and len(board_cards) >= 3:
+            return True
+        
+        # Check for flush draw possibility (4 cards of same suit on board)
+        for suit, count in suit_counts.items():
+            if count == 4:
+                return True  # Opponent could have the 5th card of that suit
+        
+        # Check for straight draw possibility (4 consecutive ranks, or 4 ranks with 1 gap)
+        board_rank_values = sorted(set([rank_to_value[rank] for rank in board_ranks]))
+        if len(board_rank_values) >= 4:
+            for i in range(len(board_rank_values) - 3):
+                consecutive_ranks = board_rank_values[i:i+4]
+                gap = consecutive_ranks[-1] - consecutive_ranks[0]
+                # Open-ended (4 consecutive) or gutshot (gap of 4 with 1 missing in between)
+                if gap == 3 or (gap == 4 and len(consecutive_ranks) == 4):
+                    return True  # Opponent could complete the straight
+        
+        # Check for set draw possibility (pair on board - opponent could have the 3rd card)
+        for rank, count in rank_counts.items():
+            if count == 2:
+                return True  # Opponent could have the 3rd card
+        
+        return False
 
 
 if __name__ == '__main__':

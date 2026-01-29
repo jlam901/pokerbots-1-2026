@@ -7,7 +7,25 @@ from skeleton.states import NUM_ROUNDS, STARTING_STACK, BIG_BLIND, SMALL_BLIND
 from skeleton.bot import Bot
 from skeleton.runner import parse_args, run_bot
 
-import random
+import csv
+import os
+from itertools import combinations
+
+
+RANK_ORDER = "23456789TJQKA"
+
+# Post-flop hand strength -> (target_contribution, max_total for round; None = all-in)
+POSTFLOP_TARGET_MAX = {
+    "quads": (100, None),
+    "full_house": (100, None),
+    "flush": (75, 200),
+    "straight": (50, 150),
+    "trips": (40, 100),
+    "two_pair": (35, 80),
+    "top_pair": (30, 50),
+    "second_pair": (10, 20),
+    "nothing": (0, 5),
+}
 
 
 class Player(Bot):
@@ -25,7 +43,322 @@ class Player(Bot):
         Returns:
         Nothing.
         '''
-        pass
+        base_dir = os.path.dirname(__file__)
+        self.preflop_chart_offsuit = self._load_preflop_chart(
+            os.path.join(base_dir, "preflop_chart_offsuit.csv")
+        )
+        self.preflop_chart_suited_two = self._load_preflop_chart(
+            os.path.join(base_dir, "preflop_chart_suited_two.csv")
+        )
+        self.preflop_chart_suited_three = self._load_preflop_chart(
+            os.path.join(base_dir, "preflop_chart_suited_three.csv")
+        )
+
+    @staticmethod
+    def _load_preflop_chart(path):
+        '''Load a preflop CSV chart into a dict of hand -> win_pct.'''
+        chart = {}
+        try:
+            with open(path, newline="") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    hand = row["hand"].strip()
+                    if not hand:
+                        continue
+                    try:
+                        win_pct = float(row["win_pct"])
+                    except (KeyError, ValueError):
+                        continue
+                    chart[hand] = win_pct
+        except OSError:
+            # If loading fails, leave chart empty; we'll fall back to neutral strategy.
+            chart = {}
+        return chart
+
+    def _get_preflop_win_pct(self, my_cards):
+        '''Return preflop win percentage for a 3-card hand using the correct chart.'''
+        ranks = [card[0] for card in my_cards]
+        suits = [card[1] for card in my_cards]
+
+        # Sort ranks from highest to lowest according to RANK_ORDER
+        ranks_sorted = sorted(ranks, key=lambda r: RANK_ORDER.index(r), reverse=True)
+        hand_key = "".join(ranks_sorted)
+
+        unique_suits = len(set(suits))
+        if unique_suits == 1:
+            chart = self.preflop_chart_suited_three
+        elif unique_suits == 2:
+            chart = self.preflop_chart_suited_two
+        else:
+            chart = self.preflop_chart_offsuit
+
+        win_pct = chart.get(hand_key)
+        # If we don't find the hand for some reason, fall back to a neutral 50%
+        if win_pct is None:
+            return 50.0
+        return win_pct
+
+    def _choose_preflop_action(self, round_state, legal_actions, my_pip, opp_pip, my_stack, win_pct):
+        '''Preflop betting strategy based on our estimated win probability.'''
+        continue_cost = opp_pip - my_pip
+
+        # Case 1: very weak hand, win_pct < 50
+        if win_pct < 50.0:
+            if continue_cost <= 0 and CheckAction in legal_actions:
+                return CheckAction()
+            if 0 < continue_cost <= 2 and CallAction in legal_actions:
+                return CallAction()
+            if FoldAction in legal_actions and continue_cost > 0:
+                return FoldAction()
+            # Fallback: check or call if that's all we can do
+            if CheckAction in legal_actions:
+                return CheckAction()
+            if CallAction in legal_actions:
+                return CallAction()
+
+        # Case 2: marginal hand, 50 <= win_pct < 60
+        if 50.0 <= win_pct < 60.0:
+            if continue_cost <= 0 and CheckAction in legal_actions:
+                return CheckAction()
+            if 0 < continue_cost <= 5 and CallAction in legal_actions:
+                return CallAction()
+            if FoldAction in legal_actions and continue_cost > 0:
+                return FoldAction()
+            if CheckAction in legal_actions:
+                return CheckAction()
+            if CallAction in legal_actions:
+                return CallAction()
+
+        # Helper for more aggressive tiers
+        def aggressive_preflop(target_contribution, max_total=None):
+            nonlocal continue_cost
+
+            # If there's a cap and calling would exceed it, fold
+            if max_total is not None and continue_cost > 0:
+                if my_pip + continue_cost > max_total:
+                    if FoldAction in legal_actions:
+                        return FoldAction()
+
+            # Try to reach at least target_contribution for this round
+            # First see what calling would do
+            projected_pip_if_call = my_pip + max(continue_cost, 0)
+
+            # Decide whether to raise
+            if RaiseAction in legal_actions and my_stack > continue_cost:
+                min_raise, max_raise = round_state.raise_bounds()
+
+                # Desired total contribution after raise
+                desired_total = max(target_contribution, projected_pip_if_call)
+
+                # Respect max_raise and optional max_total cap
+                raise_to = desired_total
+                if raise_to < min_raise:
+                    raise_to = min_raise
+                if raise_to > max_raise:
+                    raise_to = max_raise
+                if max_total is not None and raise_to > max_total:
+                    raise_to = max_total
+
+                # Only raise if it actually increases our contribution and we can afford it
+                if raise_to > my_pip and raise_to - my_pip <= my_stack and min_raise <= raise_to <= max_raise:
+                    return RaiseAction(raise_to)
+
+            # If we didn't raise, fall back to calling/checking within limits
+            if continue_cost <= 0 and CheckAction in legal_actions:
+                return CheckAction()
+            if continue_cost > 0 and CallAction in legal_actions:
+                # If there's a cap, ensure we respect it
+                if max_total is None or my_pip + continue_cost <= max_total:
+                    return CallAction()
+            if FoldAction in legal_actions and continue_cost > 0:
+                return FoldAction()
+            if CheckAction in legal_actions:
+                return CheckAction()
+            if CallAction in legal_actions:
+                return CallAction()
+            return None
+
+        # Case 3: decent hand, 60 <= win_pct < 70
+        if 60.0 <= win_pct < 70.0:
+            action = aggressive_preflop(target_contribution=10, max_total=40)
+            if action is not None:
+                return action
+
+        # Case 4: strong hand, 70 <= win_pct < 80
+        if 70.0 <= win_pct < 80.0:
+            action = aggressive_preflop(target_contribution=20, max_total=100)
+            if action is not None:
+                return action
+
+        # Case 5: very strong hand, 80 <= win_pct < 90
+        if 80.0 <= win_pct < 90.0:
+            action = aggressive_preflop(target_contribution=30, max_total=None)
+            if action is not None:
+                return action
+
+        # Case 6: monster hand, win_pct >= 90
+        if win_pct >= 90.0:
+            action = aggressive_preflop(target_contribution=50, max_total=None)
+            if action is not None:
+                return action
+
+        # As a very last resort, default to a simple check/call preference
+        if continue_cost <= 0 and CheckAction in legal_actions:
+            return CheckAction()
+        if CallAction in legal_actions:
+            return CallAction()
+        if CheckAction in legal_actions:
+            return CheckAction()
+        if FoldAction in legal_actions:
+            return FoldAction()
+        return CallAction()  # fallback
+
+    @staticmethod
+    def _rank_value(rank):
+        """Return numeric value for rank (2=0, A=12)."""
+        return RANK_ORDER.index(rank)
+
+    def _evaluate_five_cards(self, cards):
+        """
+        Evaluate a 5-card hand. Returns (category, tiebreak) for comparison.
+        category: quads, full_house, flush, straight, trips, two_pair, one_pair, high_card
+        For one_pair we need to distinguish top_pair vs second_pair later using board.
+        """
+        ranks = [c[0] for c in cards]
+        suits = [c[1] for c in cards]
+        rank_vals = sorted([self._rank_value(r) for r in ranks], reverse=True)
+        rank_counts = {}
+        for r in ranks:
+            rank_counts[r] = rank_counts.get(r, 0) + 1
+        count_list = sorted(rank_counts.values(), reverse=True)
+        is_flush = len(set(suits)) == 1
+        # Straight: sort values, check for 5 consecutive; handle A-2-3-4-5 (wheel)
+        sorted_vals = sorted(set(rank_vals), reverse=True)
+        is_straight = False
+        straight_high = -1
+        if len(sorted_vals) >= 5:
+            for i in range(len(sorted_vals) - 4):
+                run = sorted_vals[i : i + 5]
+                if run[0] - run[4] == 4:
+                    is_straight = True
+                    straight_high = run[0]
+                    break
+            # wheel: A-2-3-4-5 (12,0,1,2,3)
+            if not is_straight and 12 in sorted_vals:
+                if all(v in sorted_vals for v in [0, 1, 2, 3]):
+                    is_straight = True
+                    straight_high = 3  # 5 high
+
+        if count_list[0] == 4:
+            return ("quads", rank_vals)
+        if count_list[0] == 3 and count_list[1] >= 2:
+            return ("full_house", rank_vals)
+        if is_flush:
+            return ("flush", rank_vals)
+        if is_straight:
+            return ("straight", rank_vals)
+        if count_list[0] == 3:
+            return ("trips", rank_vals)
+        if count_list[0] == 2 and count_list[1] == 2:
+            return ("two_pair", rank_vals)
+        if count_list[0] == 2:
+            return ("one_pair", rank_vals)
+        return ("high_card", rank_vals)
+
+    def _evaluate_postflop_hand(self, my_cards, board_cards):
+        """
+        Find best 5-card hand from my_cards (2) + board_cards (4, 5, or 6).
+        Returns category: quads, full_house, flush, straight, trips, two_pair, top_pair, second_pair, nothing.
+        """
+        all_cards = list(my_cards) + list(board_cards)
+        if len(all_cards) < 5:
+            return "nothing"
+        category_order = (
+            "high_card",
+            "one_pair",
+            "two_pair",
+            "trips",
+            "straight",
+            "flush",
+            "full_house",
+            "quads",
+        )
+        def pair_rank_from_five(five_cards):
+            ranks = [c[0] for c in five_cards]
+            for r in set(ranks):
+                if ranks.count(r) == 2:
+                    return r
+            return None
+
+        best_category = "high_card"
+        best_tiebreak = []
+        best_pair_rank = None
+
+        for five in combinations(all_cards, 5):
+            five_list = list(five)
+            cat, tiebreak = self._evaluate_five_cards(five_list)
+            if category_order.index(cat) > category_order.index(best_category):
+                best_category = cat
+                best_tiebreak = tiebreak
+                best_pair_rank = pair_rank_from_five(five_list) if cat == "one_pair" else None
+            elif cat == best_category and tiebreak > best_tiebreak:
+                best_tiebreak = tiebreak
+                if cat == "one_pair":
+                    best_pair_rank = pair_rank_from_five(five_list)
+
+        if best_category == "one_pair":
+            # Classify as top_pair, second_pair, or nothing (pair below 2nd on board)
+            board_ranks = [c[0] for c in board_cards]
+            board_rank_vals = sorted(
+                set(self._rank_value(r) for r in board_ranks), reverse=True
+            )
+            if len(board_rank_vals) < 2:
+                return "top_pair"  # only one rank on board
+            pair_val = self._rank_value(best_pair_rank) if best_pair_rank else -1
+            if pair_val == board_rank_vals[0]:
+                return "top_pair"
+            if pair_val == board_rank_vals[1]:
+                return "second_pair"
+            return "nothing"
+        if best_category == "high_card":
+            return "nothing"
+        return best_category
+
+    def _choose_postflop_action(
+        self, round_state, legal_actions, my_pip, opp_pip, my_stack, target_contribution, max_total
+    ):
+        """Play post-flop by target contribution and max call for the round (core rule)."""
+        continue_cost = opp_pip - my_pip
+        # max_total None = all-in (no cap)
+        if max_total is not None and continue_cost > 0:
+            if my_pip + continue_cost > max_total:
+                if FoldAction in legal_actions:
+                    return FoldAction()
+        projected_pip_if_call = my_pip + max(continue_cost, 0)
+        if RaiseAction in legal_actions and my_stack > continue_cost:
+            min_raise, max_raise = round_state.raise_bounds()
+            desired_total = max(target_contribution, projected_pip_if_call)
+            raise_to = desired_total
+            if raise_to < min_raise:
+                raise_to = min_raise
+            if raise_to > max_raise:
+                raise_to = max_raise
+            if max_total is not None and raise_to > max_total:
+                raise_to = max_total
+            if raise_to > my_pip and raise_to - my_pip <= my_stack and min_raise <= raise_to <= max_raise:
+                return RaiseAction(raise_to)
+        if continue_cost <= 0 and CheckAction in legal_actions:
+            return CheckAction()
+        if continue_cost > 0 and CallAction in legal_actions:
+            if max_total is None or my_pip + continue_cost <= max_total:
+                return CallAction()
+        if FoldAction in legal_actions and continue_cost > 0:
+            return FoldAction()
+        if CheckAction in legal_actions:
+            return CheckAction()
+        if CallAction in legal_actions:
+            return CallAction()
+        return CallAction()
 
     def handle_new_round(self, game_state, round_state, active):
         '''
@@ -99,6 +432,18 @@ class Player(Bot):
         my_contribution = STARTING_STACK - my_stack
         # the number of chips your opponent has contributed to the pot
         opp_contribution = STARTING_STACK - opp_stack
+
+        # Preflop strategy using preflop charts
+        if street == 0:
+            win_pct = self._get_preflop_win_pct(my_cards)
+            return self._choose_preflop_action(
+                round_state=round_state,
+                legal_actions=legal_actions,
+                my_pip=my_pip,
+                opp_pip=opp_pip,
+                my_stack=my_stack,
+                win_pct=win_pct,
+            )
 
         # Only use DiscardAction if it's in legal_actions (which already checks street)
         # legal_actions() returns DiscardAction only when street is 2 or 3
@@ -224,16 +569,22 @@ class Player(Bot):
                         weakest_rank_value = rank_value
             
             return DiscardAction(weakest_index)
-        if RaiseAction in legal_actions:
-            # the smallest and largest numbers of chips for a legal bet/raise
-            min_raise, max_raise = round_state.raise_bounds()
-            min_cost = min_raise - my_pip  # the cost of a minimum bet/raise
-            max_cost = max_raise - my_pip  # the cost of a maximum bet/raise
-            if random.random() < 0.5:
-                return RaiseAction(min_raise)
-        if CheckAction in legal_actions:  # check-call
+
+        # Post-flop (streets 4, 5, 6): evaluate hand and play by target/max
+        if street in (4, 5, 6):
+            category = self._evaluate_postflop_hand(my_cards, board_cards)
+            target, max_call = POSTFLOP_TARGET_MAX.get(category, (0, 5))
+            max_total = max_call  # None = all-in (no cap)
+            return self._choose_postflop_action(
+                round_state, legal_actions, my_pip, opp_pip, my_stack, target, max_total
+            )
+
+        # Fallback for street 2/3 when not discarding: check/call (no random fold/raise)
+        if CheckAction in legal_actions:
             return CheckAction()
-        if random.random() < 0.25:
+        if CallAction in legal_actions:
+            return CallAction()
+        if FoldAction in legal_actions:
             return FoldAction()
         return CallAction()
 

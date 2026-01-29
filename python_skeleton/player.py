@@ -9,43 +9,6 @@ from skeleton.runner import parse_args, run_bot
 
 import random
 
-def get_low(cards):
-    """
-    Given a list of cards, returns the lowest one.
-    """
-    id = 0
-    for i, card in enumerate(cards):
-        if card[0] < cards[id][0]:
-            id = i
-    return i
-
-
-def standardize(cards):
-    dic = {
-        str(i): i for i in range(2, 10)
-    }
-    dic["T"] = 10
-    dic["J"] = 11
-    dic["Q"] = 12
-    dic["K"] = 13
-    dic["A"] = 14
-
-    
-
-def handle_same_cards(mycards, comcards):
-    paired_indices = set()
-    mycards_ordered = sorted((value, idx) for idx, value in enumerate(mycards))
-
-    for card, i in mycards_ordered:
-        for com in comcards:
-            if card[0] == com[0]:
-                paired_indices.append(i)
-    
-    for card, i in mycards_ordered:
-        if i not in paired_indices:
-            return (len(paired_indices) > 0), i
-    return True, 0
-            
 
 class Player(Bot):
     '''
@@ -118,7 +81,8 @@ class Player(Bot):
         Your action.
         '''
         legal_actions = round_state.legal_actions()  # the actions you are allowed to take
-        # 0, 3, 4, or 5 representing pre-flop, flop, turn, or river respectively
+        # 0, 2, 3, 4, 5, 6 representing pre-flop, bb discard, sb discard, post
+        # discard flop betting, and then turn and river
         street = round_state.street
         my_cards = round_state.hands[active]  # your cards
         board_cards = round_state.board  # the board cards
@@ -135,48 +99,19 @@ class Player(Bot):
         my_contribution = STARTING_STACK - my_stack
         # the number of chips your opponent has contributed to the pot
         opp_contribution = STARTING_STACK - opp_stack
-        
-        ranks="234567889TJQKA"
+
         # Only use DiscardAction if it's in legal_actions (which already checks street)
         # legal_actions() returns DiscardAction only when street is 2 or 3
         if DiscardAction in legal_actions:
-            if board_cards[0][1] == board_cards[1][1]:
-                suit_dict = {}
-                playable_cards = my_cards + board_cards
-                for i in playable_cards:
-                    if i[1] in suit_dict:
-                        count = suit_dict[i] + 1
-                    else:
-                        suit_dict[i] = 1
-                for i in suit_dict:
-                    if suit_dict[i] == 4:
-                        for 
-
-            # keep pair and discard from remaining
-            pair_exists, id = handle_same_cards(my_cards, board_cards)
-            return DiscardAction(id)
-
-            #discard worst
-            rank_list=[]
-            num_cards=len(my_cards)
-            for card in range(num_cards):
-                rank_list.append(ranks.index(my_cards[card][0]))
-            min_rank_idx=rank_list.index(min(rank_list))
-            return DiscardAction(min_rank_idx)
-        if street==0:
-            if CheckAction in legal_actions:
-                return CheckAction()
-            else:
-                return CallAction()
+            # Always discards the first card in the bot's hand
+            return DiscardAction(0)
         if RaiseAction in legal_actions:
             # the smallest and largest numbers of chips for a legal bet/raise
             min_raise, max_raise = round_state.raise_bounds()
             min_cost = min_raise - my_pip  # the cost of a minimum bet/raise
             max_cost = max_raise - my_pip  # the cost of a maximum bet/raise
-            l
-tseegr
-            for i in board_cards:
-                
+            if random.random() < 0.5:
+                return RaiseAction(min_raise)
         if CheckAction in legal_actions:  # check-call
             return CheckAction()
         if random.random() < 0.25:

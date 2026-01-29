@@ -18,14 +18,27 @@ RANK_ORDER = "23456789TJQKA"
 POSTFLOP_TARGET_MAX = {
     "quads": (100, None),
     "full_house": (100, None),
-    "flush": (75, 200),
-    "straight": (50, 150),
-    "trips": (40, 100),
-    "two_pair": (35, 80),
-    "top_pair": (30, 50),
-    "second_pair": (10, 20),
-    "nothing": (0, 5),
+    "flush": (75, None),
+    "straight": (50, None),
+    "trips": (40, None),
+    "two_pair": (35, 200),
+    "top_pair": (30, 200),
+    "second_pair": (10, 100),
+    "nothing": (0, 10),
 }
+
+# Hand strength order (weakest to strongest) for fold-vs-history logic
+HAND_STRENGTH_ORDER = (
+    "nothing",
+    "second_pair",
+    "top_pair",
+    "two_pair",
+    "trips",
+    "straight",
+    "flush",
+    "full_house",
+    "quads",
+)
 
 
 class Player(Bot):
@@ -53,6 +66,13 @@ class Player(Bot):
         self.preflop_chart_suited_three = self._load_preflop_chart(
             os.path.join(base_dir, "preflop_chart_suited_three.csv")
         )
+        # Per-hand-strength target and max (updated during play)
+        self._target_contribution = {k: v[0] for k, v in POSTFLOP_TARGET_MAX.items()}
+        self._max_call = {k: v[1] for k, v in POSTFLOP_TARGET_MAX.items()}
+        # Opponent bet history (amount they have in the round when they raised us)
+        self._opponent_bet_history = []
+        self._we_raised_this_round = False
+        self._current_hand_category = None
 
     @staticmethod
     def _load_preflop_chart(path):
@@ -106,7 +126,7 @@ class Player(Bot):
         if win_pct < 50.0:
             if continue_cost <= 0 and CheckAction in legal_actions:
                 return CheckAction()
-            if 0 < continue_cost <= 2 and CallAction in legal_actions:
+            if 0 < continue_cost <= 8 and CallAction in legal_actions:
                 return CallAction()
             if FoldAction in legal_actions and continue_cost > 0:
                 return FoldAction()
@@ -120,7 +140,7 @@ class Player(Bot):
         if 50.0 <= win_pct < 60.0:
             if continue_cost <= 0 and CheckAction in legal_actions:
                 return CheckAction()
-            if 0 < continue_cost <= 5 and CallAction in legal_actions:
+            if 0 < continue_cost <= 20 and CallAction in legal_actions:
                 return CallAction()
             if FoldAction in legal_actions and continue_cost > 0:
                 return FoldAction()
@@ -180,13 +200,13 @@ class Player(Bot):
 
         # Case 3: decent hand, 60 <= win_pct < 70
         if 60.0 <= win_pct < 70.0:
-            action = aggressive_preflop(target_contribution=10, max_total=40)
+            action = aggressive_preflop(target_contribution=10, max_total=160)
             if action is not None:
                 return action
 
         # Case 4: strong hand, 70 <= win_pct < 80
         if 70.0 <= win_pct < 80.0:
-            action = aggressive_preflop(target_contribution=20, max_total=100)
+            action = aggressive_preflop(target_contribution=20, max_total=400)
             if action is not None:
                 return action
 
@@ -378,7 +398,8 @@ class Player(Bot):
         round_num = game_state.round_num  # the round number from 1 to NUM_ROUNDS
         my_cards = round_state.hands[active]  # your cards
         big_blind = bool(active)  # True if you are the big blind
-        pass
+        self._we_raised_this_round = False
+        self._current_hand_category = None
 
     def handle_round_over(self, game_state, terminal_state, active):
         '''
@@ -398,7 +419,21 @@ class Player(Bot):
         my_cards = previous_state.hands[active]  # your cards
         # opponent's cards or [] if not revealed
         opp_cards = previous_state.hands[1-active]
-        pass
+
+        # Update target for this hand strength if we had raised this round
+        if self._we_raised_this_round and self._current_hand_category is not None:
+            cat = self._current_hand_category
+            if cat not in self._target_contribution:
+                pass
+            else:
+                tar = self._target_contribution[cat]
+                # Opponent was to act (they folded) <=> previous_state.button % 2 != active
+                if previous_state.button % 2 != active:
+                    tar = tar * 0.8
+                else:
+                    tar = tar * 1.2
+                tar = max(0, min(int(round(tar)), STARTING_STACK))
+                self._target_contribution[cat] = tar
 
     def get_action(self, game_state, round_state, active):
         '''
@@ -414,6 +449,13 @@ class Player(Bot):
         Your action.
         '''
         legal_actions = round_state.legal_actions()  # the actions you are allowed to take
+
+        # Priority: if we're ahead by more than (remaining rounds) * 1.5, fold at soonest moment
+        remaining_rounds = NUM_ROUNDS - game_state.round_num
+        lock_in_threshold = remaining_rounds * 3 / 2
+        if game_state.bankroll > lock_in_threshold and FoldAction in legal_actions:
+            return FoldAction()
+
         # 0, 2, 3, 4, 5, 6 representing pre-flop, bb discard, sb discard, post
         # discard flop betting, and then turn and river
         street = round_state.street
@@ -572,12 +614,39 @@ class Player(Bot):
 
         # Post-flop (streets 4, 5, 6): evaluate hand and play by target/max
         if street in (4, 5, 6):
+            # Record opponent's bet when they have put more than us this round
+            if continue_cost > 0:
+                self._opponent_bet_history.append(opp_pip)
+
             category = self._evaluate_postflop_hand(my_cards, board_cards)
-            target, max_call = POSTFLOP_TARGET_MAX.get(category, (0, 5))
+            self._current_hand_category = category
+
+            # Fold vs opponent bet history: only when top 10% of their bets >= 50 chips
+            hist = self._opponent_bet_history
+            if len(hist) >= 10 and FoldAction in legal_actions and continue_cost > 0:
+                sorted_hist = sorted(hist)
+                p90_idx = int(0.9 * len(sorted_hist))
+                if p90_idx < len(sorted_hist) and sorted_hist[p90_idx] > 80:
+                    p90 = sorted_hist[p90_idx]
+                    p80 = sorted_hist[int(0.8 * len(sorted_hist))]
+                    p70 = sorted_hist[int(0.7 * len(sorted_hist))]
+                    cat_idx = HAND_STRENGTH_ORDER.index(category) if category in HAND_STRENGTH_ORDER else 0
+                    if opp_pip > p90 and cat_idx < HAND_STRENGTH_ORDER.index("straight"):
+                        return FoldAction()
+                    if opp_pip > p80 and cat_idx < HAND_STRENGTH_ORDER.index("trips"):
+                        return FoldAction()
+                    if opp_pip > p70 and cat_idx < HAND_STRENGTH_ORDER.index("two_pair"):
+                        return FoldAction()
+
+            target = self._target_contribution.get(category, 0)
+            max_call = self._max_call.get(category, 5)
             max_total = max_call  # None = all-in (no cap)
-            return self._choose_postflop_action(
+            action = self._choose_postflop_action(
                 round_state, legal_actions, my_pip, opp_pip, my_stack, target, max_total
             )
+            if isinstance(action, RaiseAction):
+                self._we_raised_this_round = True
+            return action
 
         # Fallback for street 2/3 when not discarding: check/call (no random fold/raise)
         if CheckAction in legal_actions:

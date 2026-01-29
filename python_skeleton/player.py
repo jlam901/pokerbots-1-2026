@@ -102,9 +102,128 @@ class Player(Bot):
 
         # Only use DiscardAction if it's in legal_actions (which already checks street)
         # legal_actions() returns DiscardAction only when street is 2 or 3
+        
         if DiscardAction in legal_actions:
-            # Always discards the first card in the bot's hand
-            return DiscardAction(0)
+            # Combine player's cards and board cards
+            all_cards = my_cards + board_cards
+            
+            # Extract ranks and suits from all cards
+            rank_order = "23456789TJQKA"
+            all_ranks = [card[0] for card in all_cards]
+            all_suits = [card[1] for card in all_cards]
+            my_ranks = [card[0] for card in my_cards]
+            my_suits = [card[1] for card in my_cards]
+            
+            # Count occurrences of each rank
+            rank_counts = {}
+            for rank in all_ranks:
+                rank_counts[rank] = rank_counts.get(rank, 0) + 1
+            
+            # Check if player has 3 of the same card
+            for rank in my_ranks:
+                if rank_counts[rank] >= 3:
+                    # Check if all 3 of my cards are the same rank
+                    if my_ranks.count(rank) == 3:
+                        return DiscardAction(0)
+            
+            # Check for flush draws (4 cards of the same suit)
+            cards_in_flush_draw = set()
+            suit_counts = {}
+            for i, suit in enumerate(all_suits):
+                suit_counts[suit] = suit_counts.get(suit, 0) + 1
+            
+            # Find suits with 4 cards (flush draw)
+            flush_draw_suits = [suit for suit, count in suit_counts.items() if count == 4]
+            if flush_draw_suits:
+                flush_suit = flush_draw_suits[0]
+                # Mark which of my cards are part of the flush draw
+                for i, suit in enumerate(my_suits):
+                    if suit == flush_suit:
+                        cards_in_flush_draw.add(i)
+            
+            # Check for open-ended straight draws
+            cards_in_straight_draw = set()
+            # Convert ranks to numeric values for easier comparison
+            rank_to_value = {rank: i for i, rank in enumerate(rank_order)}
+            all_rank_values = sorted(set([rank_to_value[rank] for rank in all_ranks]))
+            
+            # Check for open-ended straight draws (4 consecutive ranks)
+            for start_idx in range(len(all_rank_values) - 3):
+                consecutive_ranks = all_rank_values[start_idx:start_idx + 4]
+                # Check if they form 4 consecutive ranks (difference of 3 between first and last)
+                if consecutive_ranks[-1] - consecutive_ranks[0] == 3:
+                    first_rank_val = consecutive_ranks[0]
+                    last_rank_val = consecutive_ranks[-1]
+                    
+                    # Check if it's open-ended (can be completed on either end)
+                    # Can extend left if first_rank > 0 (not Ace)
+                    can_extend_left = first_rank_val > 0
+                    # Can extend right if last_rank < 12 (not King)
+                    can_extend_right = last_rank_val < len(rank_order) - 1
+                    
+                    # Open-ended means we can complete on at least one end
+                    if can_extend_left or can_extend_right:
+                        # This is an open-ended straight draw
+                        # Find which of my cards are part of this draw
+                        draw_ranks = [rank_order[val] for val in consecutive_ranks]
+                        for i, rank in enumerate(my_ranks):
+                            if rank in draw_ranks:
+                                cards_in_straight_draw.add(i)
+            
+            # If we have flush draw or straight draw, discard weakest card NOT in draws
+            cards_in_draws = cards_in_flush_draw | cards_in_straight_draw
+            if cards_in_draws:
+                weakest_index = None
+                weakest_rank_value = -1
+                
+                for i, rank in enumerate(my_ranks):
+                    if i not in cards_in_draws:  # This card is not part of any draw
+                        rank_value = rank_order.index(rank)
+                        if weakest_index is None or rank_value < weakest_rank_value:
+                            weakest_index = i
+                            weakest_rank_value = rank_value
+                
+                # If all cards are in draws, discard the weakest one overall
+                if weakest_index is None:
+                    weakest_index = 0
+                    weakest_rank_value = rank_order.index(my_ranks[0])
+                    for i, rank in enumerate(my_ranks):
+                        rank_value = rank_order.index(rank)
+                        if rank_value < weakest_rank_value:
+                            weakest_index = i
+                            weakest_rank_value = rank_value
+                
+                return DiscardAction(weakest_index)
+            
+            # Fall back to pair logic if no draws
+            # Find which of my cards are part of pairs (or better)
+            cards_in_pairs = set()
+            for i, rank in enumerate(my_ranks):
+                if rank_counts[rank] >= 2:  # This card is part of a pair or better
+                    cards_in_pairs.add(i)
+            
+            # Find the weakest card that is NOT in any pair
+            weakest_index = None
+            weakest_rank_value = -1
+            
+            for i, rank in enumerate(my_ranks):
+                if i not in cards_in_pairs:  # This card is not part of any pair
+                    rank_value = rank_order.index(rank)
+                    if weakest_index is None or rank_value < weakest_rank_value:
+                        weakest_index = i
+                        weakest_rank_value = rank_value
+            
+            # If all cards are in pairs, discard the weakest one overall
+            if weakest_index is None:
+                weakest_index = 0
+                weakest_rank_value = rank_order.index(my_ranks[0])
+                for i, rank in enumerate(my_ranks):
+                    rank_value = rank_order.index(rank)
+                    if rank_value < weakest_rank_value:
+                        weakest_index = i
+                        weakest_rank_value = rank_value
+            
+            return DiscardAction(weakest_index)
         if RaiseAction in legal_actions:
             # the smallest and largest numbers of chips for a legal bet/raise
             min_raise, max_raise = round_state.raise_bounds()

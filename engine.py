@@ -103,7 +103,7 @@ class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks'
             TerminalState: A terminal state object containing:
                 - List of deltas (positive for winner, negative for loser)
                 - Reference to the previous game state
-        
+
         Note:
             This method assumes both players have equal stacks when reaching showdown,
             which is enforced by an assertion.
@@ -118,7 +118,7 @@ class RoundState(namedtuple('_RoundState', ['button', 'street', 'pips', 'stacks'
         else:
             # split the pot
             delta = self.get_delta(2)
-        
+
         return TerminalState([int(delta), -int(delta)], self)
 
     def legal_actions(self):
@@ -287,13 +287,20 @@ class Player():
         '''
         if self.commands is not None and len(self.commands['run']) > 0:
             try:
+                run_cmd = list(self.commands['run'])
+                # Prefer the current interpreter for python-based bots.
+                if run_cmd:
+                    exe_name = os.path.basename(run_cmd[0]).lower()
+                    if exe_name in ('python', 'python3', 'python.exe', 'python3.exe'):
+                        if sys.executable:
+                            run_cmd[0] = sys.executable
                 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 with server_socket:
                     server_socket.bind(('', 0))
                     server_socket.settimeout(CONNECT_TIMEOUT)
                     server_socket.listen()
                     port = server_socket.getsockname()[1]
-                    proc = subprocess.Popen(self.commands['run'] + [str(port)],
+                    proc = subprocess.Popen(run_cmd + [str(port)],
                                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                             cwd=self.path)
                     self.bot_subprocess = proc
@@ -301,10 +308,10 @@ class Player():
                     def enqueue_output(out, queue):
                         try:
                             for line in out:
-                                if self.path == r"./player_chatbot":
-                                    print(line.strip().decode("utf-8"))
-                                else:
-                                    queue.put(line)
+                                decoded = line.strip().decode("utf-8")
+                                if decoded:
+                                    print(decoded)
+                                queue.put(line)
                         except ValueError:
                             pass
                     # start a separate bot listening thread which dies with the program
@@ -321,8 +328,9 @@ class Player():
                         print(self.name, 'connected successfully')
             except (TypeError, ValueError):
                 print(self.name, 'run command misformatted')
-            except OSError:
+            except OSError as error:
                 print(self.name, 'run failed - check "run" in commands.json')
+                print(self.name, 'run error:', error)
             except socket.timeout:
                 print('Timed out waiting for', self.name, 'to connect')
 
@@ -466,8 +474,8 @@ class Game():
         else:
             self.turn_bets = {players[0].name: STARTING_STACK-round_state.stacks[0]-self.flop_bets[players[0].name]-self.preflop_bets[players[0].name],
                                 players[1].name: STARTING_STACK-round_state.stacks[1]-self.flop_bets[players[1].name]-self.preflop_bets[players[1].name]}
-            
-        
+
+
         if round_state.street == 0 and round_state.button == 0:
             self.log.append('{} posts the blind of {}'.format(players[0].name, SMALL_BLIND))
             self.log.append('{} posts the blind of {}'.format(players[1].name, BIG_BLIND))
@@ -576,10 +584,10 @@ class Game():
             self.log.append('Round #' + str(round_num) + STATUS(players))
             self.run_round(players)
             players = players[::-1]
-            
+
         self.log.append('')
         self.log.append('Final' + STATUS(players))
-        
+
         for player in players:
             self.log.append('{} preflop bets EV: {}'.format(player.name, self.ev_preflop_bets[player.name]))
             self.log.append('{} flop bets EV: {}'.format(player.name, self.ev_flop_bets[player.name]))

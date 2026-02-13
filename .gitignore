@@ -8,3 +8,6 @@ gamelog.txt
 .metadata/
 build/
 .vscode/
+*.txt
+*.zip
+gamelog_*

@@ -1,0 +1,2 @@
+Loaded CFR strategy from cfr_strategy.pkl
+Strategy contains 2972160 information sets

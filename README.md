@@ -1,6 +1,6 @@
 # MIT Pokerbots 2026
 
-Team bot for the [MIT Pokerbots](https://pokerbots.org) 2026 competition, built by Justin Lam ([@jlam901](https://github.com/jlam901)), [@azjargal-g](https://github.com/azjargal-g), and Danny Thach. The team finished in the top 25% of teams.
+Team bot for the [MIT Pokerbots](https://pokerbots.org) 2026 competition, built by Justin Lam ([@jlam901](https://github.com/jlam901)), Azjargal Ganbold [@azjargal-g](https://github.com/azjargal-g), and Danny Thach. The team finished in the top 25% of teams.
 
 ## The game
 
